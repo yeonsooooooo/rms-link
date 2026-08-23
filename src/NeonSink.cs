@@ -82,7 +82,7 @@ public sealed class NeonSink : IDisposable
                         cmd.Parameters.AddWithValue("c", ev.Code);
                         cmd.Parameters.AddWithValue("e", ev.EventRaw);
                         cmd.Parameters.AddWithValue("t", ev.EventTime);
-                        cmd.Parameters.AddWithValue("d", ev.EventDate.ToDateTime(TimeOnly.MinValue).Date);
+                        cmd.Parameters.AddWithValue("d", ev.EventDate);
                         cmd.Parameters.AddWithValue("raw", (object)ev.RawLine ?? DBNull.Value);
                         await cmd.ExecuteNonQueryAsync(_cts.Token);
 

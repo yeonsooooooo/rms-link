@@ -31,6 +31,17 @@ jobs:
           if (-not (Test-Path publish/RmsLink.exe)) { throw "RmsLink.exe not produced" }
           Get-ChildItem publish | Select-Object Name,Length | Format-Table
 
+      - name: Smoke test (--selftest on real Windows)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Write-Host "exe 기동 및 자가진단 실행..."
+          $p = Start-Process -FilePath publish/RmsLink.exe -ArgumentList '--selftest' -Wait -PassThru -WindowStyle Hidden
+          Write-Host "종료코드: $($p.ExitCode)  (2=OCR 언어팩 없음, CI 러너에선 정상일 수 있음)"
+          $r = Join-Path $env:APPDATA 'RmsLink/selftest-report.txt'
+          if (Test-Path $r) { Write-Host '--- selftest-report ---'; Get-Content $r }
+          else { Write-Host '리포트 파일 없음 (기동 실패 가능성)' }
+
       - name: Zip artifact
         shell: pwsh
         run: |
