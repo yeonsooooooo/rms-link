@@ -1,0 +1,55 @@
+name: build-release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish (self-contained, folder, win-x64)
+        shell: pwsh
+        run: |
+          dotnet publish RmsLink.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:PublishReadyToRun=true `
+            -p:PublishTrimmed=false `
+            -o publish
+          if (-not (Test-Path publish/RmsLink.exe)) { throw "RmsLink.exe not produced" }
+          Get-ChildItem publish | Select-Object Name,Length | Format-Table
+
+      - name: Zip artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish/* -DestinationPath RmsLink.zip -Force
+          "{0:N0} bytes" -f (Get-Item RmsLink.zip).Length
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RmsLink
+          path: RmsLink.zip
+
+      - name: Create/Update Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v0.1.$($env:GITHUB_RUN_NUMBER)"
+          gh release create $tag RmsLink.zip `
+            --title "RmsLink $tag" `
+            --notes "RMS 화면 연동 에이전트 자동 빌드. 설치는 README의 PowerShell 붙여넣기 명령을 사용하세요." `
+            --latest
