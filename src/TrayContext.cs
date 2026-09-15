@@ -14,7 +14,6 @@ public sealed class TrayContext : ApplicationContext
     {
         _cfg = cfg;
         _worker = new Worker(cfg, ocr);
-        _worker.Start();
 
         _statusItem = new ToolStripMenuItem("시작 중...") { Enabled = false };
 
@@ -85,11 +84,16 @@ public sealed class TrayContext : ApplicationContext
             ContextMenuStrip = menu
         };
         _icon.DoubleClick += (_, _) => ShowPreview();
-        string dbNote = cfg.DbConfigured ? "" : "  ※DB 미설정: 로컬 백업만 됩니다";
-        _icon.ShowBalloonTip(3000, "RmsLink 시작",
-            $"호텔 [{cfg.HotelId}] 이벤트 감시를 시작했습니다. (OCR: {_worker.OcrLang}){dbNote}",
-            cfg.DbConfigured ? ToolTipIcon.Info : ToolTipIcon.Warning);
-
+        _ = menu.Handle; // Create UI dispatch handle before worker callbacks.
+        _worker.Sink.ExitForUpdate = () => { if(!menu.IsDisposed) menu.BeginInvoke(new Action(ExitApp)); };
+        _worker.Start();
+        _icon.ShowBalloonTip(3000,"RmsLink 시작",$"호텔 [{cfg.HotelId}] · 맥 미니 연결 중",ToolTipIcon.Info);
+        var updateItem=new ToolStripMenuItem("지금 업데이트 확인 · 적용");
+        updateItem.Click+=(_,_)=>{_worker.Sink.ManualUpdateRequested=true;_icon.ShowBalloonTip(3000,"업데이트","맥 미니에서 최신 앱과 호텔 프로필을 확인합니다.",ToolTipIcon.Info);};
+        menu.Items.Insert(2,updateItem);
+        var settingsItem=new ToolStripMenuItem("호텔 ID 변경");
+        settingsItem.Click+=(_,_)=>Restart(false);
+        menu.Items.Insert(3,settingsItem);
         _statusTimer = new System.Windows.Forms.Timer { Interval = 5000 };
         _statusTimer.Tick += (_, _) => UpdateStatus();
         _statusTimer.Start();
@@ -98,10 +102,11 @@ public sealed class TrayContext : ApplicationContext
 
     private void UpdateStatus()
     {
+        if(_worker.LastCycleAt!=DateTime.MinValue) File.WriteAllText(Path.Combine(AppConfig.InstallDir,"healthy-"+Updater.Version),DateTime.UtcNow.ToString("O"));
         var s = _worker.Sink;
         string text =
             $"[{_cfg.HotelId}] OCR {_worker.OcrLang} · 발견 {_worker.EventsFound} · 전송 {s.SentCount} · 대기 {s.PendingCount}";
-        _statusItem.Text = text + (s.LastError.Length > 0 ? " · DB오류!" : "");
+        _statusItem.Text = text + (s.LastError.Length > 0 ? " · 전송 오류" : "") + " · " + s.UpdateStatus;
         string tip = "RmsLink - " + text;
         _icon.Text = tip.Length > 63 ? tip[..63] : tip;
     }
@@ -137,8 +142,14 @@ public sealed class TrayContext : ApplicationContext
         _cfg.Regions = regions;
         _cfg.Save();
         MessageBox.Show("영역이 저장되었습니다. 프로그램을 다시 시작합니다.", "RmsLink");
-        Application.Restart();
-        ExitApp();
+        Restart(true);
+    }
+
+    private void Restart(bool resume)
+    {
+        var psi=new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath){UseShellExecute=false};
+        psi.ArgumentList.Add("--wait-pid");psi.ArgumentList.Add(Environment.ProcessId.ToString());if(resume)psi.ArgumentList.Add("--resume");
+        System.Diagnostics.Process.Start(psi);ExitApp();
     }
 
     private void ExitApp()

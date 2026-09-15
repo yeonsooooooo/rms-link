@@ -1,0 +1,11 @@
+{
+  "revision": 1,
+  "hotelId": "*",
+  "name": "공통 키텍 이벤트",
+  "mode": "events",
+  "roomPattern": "(?<![\\d:])(\\d{3,4})\\s*호?(?![\\d:])",
+  "aliases": {},
+  "roomMap": {},
+  "pollMs": 1500,
+  "ocrScale": 3
+}

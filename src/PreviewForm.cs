@@ -37,14 +37,12 @@ public sealed class PreviewForm : Form
 
         var autoChk = new CheckBox { Text = "자동 갱신(2초)", Location = new Point(232, 14), AutoSize = true, Checked = true };
 
-        var dbBtn = new Button { Text = "DB 연결 테스트", Location = new Point(360, 11), Size = new Size(110, 26) };
+        var dbBtn = new Button { Text = "서버 연결 확인", Location = new Point(360, 11), Size = new Size(110, 26) };
         dbBtn.Click += async (_, _) =>
         {
             dbBtn.Enabled = false;
-            _statusLabel.Text = "DB 연결 확인 중...";
-            var msg = await NeonSink.TestConnectionAsync(_cfg.ConnString);
-            _statusLabel.Text = msg;
-            dbBtn.Enabled = true;
+            _statusLabel.Text = "맥 미니 연결 확인 중...";
+            try { _statusLabel.Text = await _worker.Sink.CheckConnection(); } catch(Exception ex) { _statusLabel.Text = "연결 실패: "+ex.Message; } finally { dbBtn.Enabled = true; }
         };
 
         _statusLabel = new Label
@@ -88,7 +86,8 @@ public sealed class PreviewForm : Form
     {
         int idx = Math.Max(0, _regionCombo.SelectedIndex);
         var snaps = _worker.SnapshotDiagnostics();
-        if (idx >= snaps.Count) return;
+        if (idx >= snaps.Count) { foreach(var snap in snaps) snap.Image?.Dispose(); return; }
+        for(int i=0;i<snaps.Count;i++) if(i!=idx) snaps[i].Image?.Dispose();
 
         var (img, lines, at) = snaps[idx];
 
@@ -103,7 +102,7 @@ public sealed class PreviewForm : Form
             ListViewItem item;
             if (ld.Event != null)
             {
-                string state = ld.IsNew ? "신규전송" : "중복";
+                string state = ld.IsNew ? "전송 대기" : "중복";
                 item = new ListViewItem(new[]
                 {
                     state, ld.Event.Room, ld.Event.Code + (ld.Event.Fuzzy ? "*" : ""),
@@ -124,7 +123,7 @@ public sealed class PreviewForm : Form
         string err = s.LastError.Length > 0 ? $" | 오류: {Truncate(s.LastError, 60)}" : "";
         _statusLabel.Text =
             $"OCR: {_worker.OcrLang} | 마지막 판독: {(at == DateTime.MinValue ? "-" : at.ToString("HH:mm:ss"))} " +
-            $"| OCR 실행 {_worker.OcrRuns}회 | 이벤트 {_worker.EventsFound}건 발견 | DB 전송 {s.SentCount}건, 대기 {s.PendingCount}건{err}";
+            $"| OCR 실행 {_worker.OcrRuns}회 | 이벤트 {_worker.EventsFound}건 발견 | 맥 미니 전송 {s.SentCount}건, 대기 {s.PendingCount}건{err}";
     }
 
     private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n] + "…";

@@ -5,6 +5,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if(args.Length==2 && args[0]=="--runtime-test")return Diagnostics.RuntimeTest(args[1]);
         // ---- CLI 모드 (UI 없이 실행, 설치 스크립트/원격 진단용) ----
         if (args.Any(a => a.Equals("--selftest", StringComparison.OrdinalIgnoreCase)))
             return Safe(() => Diagnostics.RunSelfTest(), 2);
@@ -23,10 +24,13 @@ internal static class Program
             return 0;
         }
 
+        int waitAt=Array.IndexOf(args,"--wait-pid");
+        if(waitAt>=0 && waitAt+1<args.Length && int.TryParse(args[waitAt+1],out int parentId))try{using var parent=System.Diagnostics.Process.GetProcessById(parentId);if(!parent.WaitForExit(45000))return 1;}catch(ArgumentException){}
+
         // ---- 일반 GUI 모드 ----
         try
         {
-            return RunGui();
+            return RunGui(args);
         }
         catch (Exception ex)
         {
@@ -43,7 +47,7 @@ internal static class Program
         }
     }
 
-    private static int RunGui()
+    private static int RunGui(string[] args)
     {
         using var mutex = new Mutex(true, @"Global\RmsLinkSingleton", out bool createdNew);
         if (!createdNew)
@@ -53,9 +57,9 @@ internal static class Program
             return 0;
         }
 
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        try { Application.SetHighDpiMode(HighDpiMode.PerMonitorV2); } catch { }
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
@@ -67,43 +71,16 @@ internal static class Program
         Logger.Info("===== RmsLink 시작 =====");
         Logger.Info($"OS={Environment.OSVersion}, .NET={Environment.Version}, exe={Environment.ProcessPath}");
 
-        var ocr = OcrService.Create();
-        if (ocr == null)
-        {
-            Logger.Error("OCR 엔진 생성 실패");
-            MessageBox.Show(
-                "이 PC에서 Windows OCR 엔진을 사용할 수 없습니다.\n" +
-                "Windows 10 이상 + 한국어 언어팩이 필요합니다.\n\n" +
-                "[설정 > 시간 및 언어 > 언어]에서 '한국어'가 설치되어 있는지 확인해 주세요.\n" +
-                "설치 후에도 안 되면 '로그 폴더'의 selftest 리포트를 보내주세요.",
-                "RmsLink", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return 2;
-        }
-        if (ocr.LanguageTag != "ko")
-        {
-            Logger.Error("한국어 OCR 없음, 사용 언어=" + ocr.LanguageTag);
-            MessageBox.Show(
-                $"한국어 OCR을 찾지 못해 '{ocr.LanguageTag}' 언어로 동작합니다.\n" +
-                "한글 이벤트(문열림 등) 인식률이 낮을 수 있습니다.\n" +
-                "[설정 > 시간 및 언어 > 언어]에서 한국어 언어팩을 설치하면 해결됩니다.",
-                "RmsLink", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-
         var cfg = AppConfig.Load();
-        if (string.IsNullOrWhiteSpace(cfg.HotelId) || cfg.Regions.Count == 0)
-        {
+        bool resume=args.Contains("--resume") && !string.IsNullOrWhiteSpace(cfg.HotelId);
+        if (!resume) {
             using var setup = new SetupForm(cfg);
-            if (setup.ShowDialog() != DialogResult.OK)
-            {
-                Logger.Info("설정 취소로 종료");
-                return 0;
-            }
+            if (setup.ShowDialog() != DialogResult.OK) return 0;
         }
-
-        if (!cfg.DbConfigured)
-            Logger.Error("경고: DB 접속정보 없음 - 이벤트가 로컬 백업(jsonl)에만 저장됩니다.");
-
-        Logger.Info($"설정: hotel={cfg.HotelId}, 영역 {cfg.Regions.Count}개, OCR={ocr.LanguageTag}, DB={cfg.DbConfigured}");
+        // The diagnostic transport must remain alive even when OCR is unavailable.
+        OcrService ocr=null;
+        try { ocr=OcrService.Create(); } catch(Exception ex){Logger.Error("OCR 초기화: "+ex.Message);}
+        Directory.CreateDirectory(AppConfig.InstallDir);
         Application.Run(new TrayContext(cfg, ocr));
         Logger.Info("===== RmsLink 종료 =====");
         return 0;

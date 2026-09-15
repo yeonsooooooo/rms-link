@@ -1,6 +1,9 @@
 bin/
 obj/
 publish/
+.data/
+.work/
+dist/
+artifacts/
+node_modules/
 *.user
-.dotnet/
-.DS_Store
