@@ -14,7 +14,7 @@ static class Program
             using var payload=Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip");
             if(payload!=null && args.Length==2 && args[0]=="--verify-payload") {
                 using var zip=new ZipArchive(payload);var files=zip.Entries.Select(x=>x.FullName).ToArray();
-                if(!files.Contains("versions/0.2.0/RmsLink.exe")||!files.Contains("RmsLinkLauncher.exe")||!files.Contains("bootstrap.json"))throw new Exception("설치 구성 누락");
+                if(!files.Any(f=>System.Text.RegularExpressions.Regex.IsMatch(f,@"^versions/\d+\.\d+\.\d+/RmsLink\.exe$"))||!files.Contains("RmsLinkLauncher.exe")||!files.Contains("bootstrap.json"))throw new Exception("설치 구성 누락");
                 File.WriteAllText(args[1],JsonSerializer.Serialize(new {passed=true,files=files.Length,installed=false}));return 0;
             }
             if(payload!=null) {

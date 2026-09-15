@@ -231,7 +231,7 @@ export class ImprovementWorker {
       {
         ...p,
         mode: "events",
-        roomPattern: "(?<![\\d:])(\\d{3,4})\\s*호?(?![\\d:])",
+        roomPattern: "(?<![\\p{L}\\d:])(\\d{3,4})\\s*호?(?![\\d:])",
         roomMap: {},
       },
       base,

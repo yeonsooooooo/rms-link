@@ -9,7 +9,7 @@ public sealed class AdapterProfile
     public string HotelId { get; set; } = "*";
     public string Name { get; set; } = "공통 키텍 이벤트";
     public string Mode { get; set; } = "events";
-    public string RoomPattern { get; set; } = @"(?<![\d:])(\d{3,4})\s*호?(?![\d:])";
+    public string RoomPattern { get; set; } = @"(?<![\p{L}\d:])(\d{3,4})\s*호?(?![\d:])";
     public Dictionary<string, string> Aliases { get; set; } = new();
     public Dictionary<string, string> RoomMap { get; set; } = new();
     public int PollMs { get; set; } = 1500;

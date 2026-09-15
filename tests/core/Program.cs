@@ -16,7 +16,7 @@ Test("101 문열림 12:00:01","DOOR_OPEN");Test("101 문닫힘 12:00:02","DOOR_C
 Test("2026-09-15 101 문열림 12:01:03","DOOR_OPEN");Test("101 문열림 99:61:78",null);Test("101 문열림 12:01:65",null);Test("2026-02-30 101 문열림 12:01:03",null);
 Test("101 문열림",null);Test("101 문열립 12:01:03",null);Test("101 문닫힘 아님 12:01:03",null);Test("101 키삽입 키제거 12:01:03",null);Test("101 문열림 문닫힘 12:01:03",null);
 Test("101 문열림", "DOOR_OPEN",profile:new(){Mode="snapshot"});Test("101 키꽂힘", "KEY_IN",profile:new(){Mode="snapshot"});Test("101 문닫힘 키제거", "KEY_OUT",profile:new(){Mode="snapshot"});
-Test("101 재실 12:01:03",null);Test("2026-09-15 101 문열림",null,profile:new(){Mode="snapshot"});
+Test("101 102 문열림 12:01:03",null);Test("A101 문열림 12:01:03",null);Test("101 재실 12:01:03",null);Test("2026-09-15 101 문열림",null,profile:new(){Mode="snapshot"});
 var old=EventParser.Parse("101 문열림 23:50:00",DateTimeOffset.Parse("2026-01-01T00:10:00+09:00"),new(),out _).Single();if(old.EventDate!=new DateOnly(2025,12,31))throw new Exception("Midnight date");count++;
 Test("A101 전원연결 12:01:03","KEY_IN",profile:new(){RoomPattern=@"(A\d{3})",RoomMap=new(){["A101"]="101"},Aliases=new(){["전원연결"]="KEY_IN"}});
 Console.WriteLine(JsonDefaults.Serialize(new {passed=true,tests=count}));return 0;

@@ -35,7 +35,7 @@ export const commonProfile = {
   hotelId: "*",
   name: "공통 키텍 이벤트",
   mode: "events",
-  roomPattern: "(?<![\\d:])(\\d{3,4})\\s*호?(?![\\d:])",
+  roomPattern: "(?<![\\p{L}\\d:])(\\d{3,4})\\s*호?(?![\\d:])",
   aliases: {},
   roomMap: {},
   pollMs: 1500,

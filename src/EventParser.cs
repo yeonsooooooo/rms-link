@@ -45,6 +45,7 @@ public static class EventParser
         } else if(date.Success || shortDate.Success) { reason="시각 없는 과거 날짜는 현재 상태로 사용할 수 없음";return result; }
         var roomMatch=Match(work,profile.RoomPattern);
         if(!roomMatch.Success || roomMatch.Groups.Count<2){reason="객실번호 없음";return result;}
+        if(Regex.Matches(work,profile.RoomPattern,RegexOptions.None,Timeout).Count>1){reason="여러 객실번호가 한 줄에 있음: 로그 열 분리 필요";return result;}
         string room=roomMatch.Groups[1].Value;
         if(profile.RoomMap.TryGetValue(room,out var mapped)) room=mapped;
         if(!Regex.IsMatch(room,@"^[\p{L}\d_-]{1,30}$")){reason="객실번호 범위 오류";return result;}
