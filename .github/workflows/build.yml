@@ -1,66 +1,53 @@
-name: build-release
-
+name: RmsLink Windows validation
 on:
   push:
-    branches: [ main ]
+    branches: [main, codex/rmslink-control]
   workflow_dispatch:
-
 permissions:
-  contents: write
-
+  contents: read
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
-
-      - name: Publish (self-contained, folder, win-x64)
-        shell: pwsh
-        run: |
-          dotnet publish RmsLink.csproj `
-            -c Release -r win-x64 --self-contained true `
-            -p:PublishSingleFile=false `
-            -p:PublishReadyToRun=true `
-            -p:PublishTrimmed=false `
-            -o publish
-          if (-not (Test-Path publish/RmsLink.exe)) { throw "RmsLink.exe not produced" }
-          Get-ChildItem publish | Select-Object Name,Length | Format-Table
-
-      - name: Smoke test (--selftest on real Windows)
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          Write-Host "exe 기동 및 자가진단 실행..."
-          $p = Start-Process -FilePath publish/RmsLink.exe -ArgumentList '--selftest' -Wait -PassThru -WindowStyle Hidden
-          Write-Host "종료코드: $($p.ExitCode)  (2=OCR 언어팩 없음, CI 러너에선 정상일 수 있음)"
-          $r = Join-Path $env:APPDATA 'RmsLink/selftest-report.txt'
-          if (Test-Path $r) { Write-Host '--- selftest-report ---'; Get-Content $r }
-          else { Write-Host '리포트 파일 없음 (기동 실패 가능성)' }
-
-      - name: Zip artifact
-        shell: pwsh
-        run: |
-          Compress-Archive -Path publish/* -DestinationPath RmsLink.zip -Force
-          "{0:N0} bytes" -f (Get-Item RmsLink.zip).Length
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-node@v4
         with:
-          name: RmsLink
-          path: RmsLink.zip
-
-      - name: Create/Update Release
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Shared parser regressions
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.1.$($env:GITHUB_RUN_NUMBER)"
-          gh release create $tag RmsLink.zip `
-            --title "RmsLink $tag" `
-            --notes "RMS 화면 연동 에이전트 자동 빌드. 설치는 README의 PowerShell 붙여넣기 명령을 사용하세요." `
-            --latest
+          dotnet run --project tests/core/Core.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Parser tests failed' }
+          dotnet publish tests/core/Core.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o core
+          if ($LASTEXITCODE -ne 0) { throw 'Core publish failed' }
+          $env:RMSLINK_CORE = "$pwd/core/RmsLinkCore.exe"
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Control tests failed' }
+      - name: Build Windows app and run runtime tests
+        shell: pwsh
+        run: |
+          dotnet publish RmsLink.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=false -o publish
+          if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
+          $report = "$pwd/runtime-test.json"
+          $p = Start-Process publish/RmsLink.exe -ArgumentList @('--runtime-test', $report) -Wait -PassThru
+          if ($p.ExitCode -ne 0 -or -not (Test-Path $report)) { throw 'Windows runtime test failed' }
+          dotnet publish installer/Installer.csproj -c Release -r win-x64 --self-contained true -o launcher
+          if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed' }
+          Compress-Archive -Path publish/* -DestinationPath RmsLink.zip
+          $hash=(Get-FileHash RmsLink.zip -Algorithm SHA256).Hash.ToLower()
+          $version=([xml](Get-Content RmsLink.csproj)).Project.PropertyGroup.Version
+          @{ passed=$true; version=$version; sha256=$hash; commit=$env:GITHUB_SHA; platform='windows-x64'; physicalKeytechVerified=$false; runtime=(Get-Content $report|ConvertFrom-Json) } | ConvertTo-Json -Depth 8 | Set-Content validation.json -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rmslink-windows-validated
+          path: |
+            RmsLink.zip
+            validation.json
+            runtime-test.json
+            launcher/RmsLinkLauncher.exe
+          retention-days: 30
