@@ -381,7 +381,7 @@ export class ImprovementWorker {
         !Array.isArray(result.aliases) ||
         result.aliases.length > 30
       )
-        throw new Error("Codex 결과 형식 오류");
+        throw new Error("분석 결과 형식 오류");
       let status = "diagnosed";
       const additions = {};
       for (const a of result.aliases) {

@@ -38,8 +38,16 @@ public static class Diagnostics
             var result=Task.Run(()=>capture.Read(w)).GetAwaiter().GetResult();using(result.Image){if(result.Image.Width!=w.W||result.Image.Height!=w.H)throw new Exception("Window capture size mismatch");result.Image.Save(Path.Combine(folder,"native-selected-window.png"));}
             var retry=WindowProbe.Find(new SelectedApplication{Executable=w.Executable,Handle=-1,Title=w.Title});if(retry.Count!=1)throw new Exception("Window handle recovery failed");
             bool rejected=false;try{var r=Task.Run(()=>capture.Read(w with{Minimized=true})).GetAwaiter().GetResult();r.Image.Dispose();}catch(Exception ex){rejected=ex.Message.StartsWith("WINDOW_MINIMIZED:");}if(!rejected)throw new Exception("Minimized window not rejected");
+            string original=Path.Combine(folder,"fixture-shortcut.lnk");
+            dynamic shell=Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));dynamic link=shell.CreateShortcut(original);
+            try{link.TargetPath=w.Executable;link.Arguments="--capture-fixture";link.WorkingDirectory=folder;link.Save();}
+            finally{System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link);}
+            target.LaunchPath=original;target.Name="키텍 앱";DesktopLinks.Ensure(new AppConfig{SelectedApp=target});
+            dynamic branded=shell.CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),"키텍 앱.lnk"));
+            try{if((string)branded.Arguments!="--capture-fixture"||!string.Equals((string)branded.TargetPath,w.Executable,StringComparison.OrdinalIgnoreCase))throw new Exception("Original shortcut arguments not preserved");if(!((string)branded.IconLocation).Contains("keytech.ico"))throw new Exception("Keytech icon missing");}
+            finally{System.Runtime.InteropServices.Marshal.FinalReleaseComObject(branded);System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);File.Delete(original);}
             using var picker=new AppPickerForm();picker.Show();Application.DoEvents();using(var shot=new Bitmap(picker.Width,picker.Height)){picker.DrawToBitmap(shot,new Rectangle(0,0,shot.Width,shot.Height));shot.Save(Path.Combine(folder,"native-app-picker.png"));}picker.Close();
-            return new{formConstruction=true,windowEnumeration=true,explicitSelection=true,unrelatedAppRejected=true,windowCapture=true,minimizedRejected=true,handleRecovery=true,fixtureOnly=true};
+            return new{shortcutArgumentsPreserved=true,keytechIcon=true,formConstruction=true,windowEnumeration=true,explicitSelection=true,unrelatedAppRejected=true,windowCapture=true,minimizedRejected=true,handleRecovery=true,fixtureOnly=true};
         }finally{if(!fixture.HasExited){fixture.Kill();fixture.WaitForExit(5000);}}
     }
     public static int RunSelfTest()

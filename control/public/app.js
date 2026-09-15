@@ -18,6 +18,10 @@ const escape = (s) =>
         c
       ],
   );
+const analysisText = (value) =>
+  String(value ?? "")
+    .replace(/\bcodex\b/gi, "분석 엔진")
+    .replace(/\bmac[ -]?mini\b|맥\s*미니/gi, "관리 서버");
 const when = (t) =>
   t
     ? new Date(t).toLocaleString("ko-KR", {
@@ -137,7 +141,7 @@ function jobsPanel() {
           .slice(0, 6)
           .map(
             (j) =>
-              `<div class="timeline-item"><b>호텔 ${escape(j.hotel_id)} · ${statusNames[j.status] || escape(j.status)}</b><small>${when(j.updated_at)}</small><div>${escape(j.result?.summary || "관리 서버 분석 대기열에 등록되었습니다.")}</div>${j.result?.action ? `<p>${escape(j.result.action)}</p>` : ""}${j.result?.aliases?.length ? `<button data-job="${j.id}" data-action="job-details">제안 규칙과 근거 보기</button>` : ""}</div>`,
+              `<div class="timeline-item"><b>호텔 ${escape(j.hotel_id)} · ${statusNames[j.status] || escape(j.status)}</b><small>${when(j.updated_at)}</small><div>${escape(analysisText(j.result?.summary || "관리 서버 분석 대기열에 등록되었습니다."))}</div>${j.result?.action ? `<p>${escape(analysisText(j.result.action))}</p>` : ""}${j.result?.aliases?.length ? `<button data-job="${j.id}" data-action="job-details">제안 규칙과 근거 보기</button>` : ""}</div>`,
           )
           .join("")}</div>`
       : empty(
@@ -395,7 +399,7 @@ root.addEventListener("click", async (e) => {
         const j = state.jobs.find((j) => j.id === el.dataset.job);
         openModal(
           "화면 분석 근거",
-          `<div class="detail"><pre>${escape(JSON.stringify(j.result, null, 2))}</pre></div>`,
+          `<div class="detail"><pre>${escape(analysisText(JSON.stringify(j.result, null, 2)))}</pre></div>`,
         );
         break;
       }
