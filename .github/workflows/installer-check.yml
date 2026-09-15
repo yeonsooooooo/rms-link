@@ -1,8 +1,5 @@
 name: RmsLink installer verification
 on:
-  push:
-    branches: [codex/rmslink-control]
-    paths: [.github/workflows/installer-check.yml]
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,20 +11,21 @@ jobs:
         shell: pwsh
         env:
           RMSLINK_INSTALLER_URL: ${{ secrets.RMSLINK_INSTALLER_URL }}
+          RMSLINK_INSTALLER_SHA256: ${{ secrets.RMSLINK_INSTALLER_SHA256 }}
         run: |
           $ErrorActionPreference = 'Stop'
           $uri = [Uri]$env:RMSLINK_INSTALLER_URL
           if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'ys-macmini.tail984bfd.ts.net' -or $uri.Port -ne 8443) { throw 'Unexpected installer origin' }
           Invoke-WebRequest -Uri $uri -OutFile RmsLink-Setup.exe
           $sha = (Get-FileHash RmsLink-Setup.exe -Algorithm SHA256).Hash.ToLower()
-          if ($sha -ne '5d396d4538af48579360953f58fda88724c519183a41ebd2c9140b6ec1cda154') { throw 'Installer digest mismatch' }
+          if ($sha -ne $env:RMSLINK_INSTALLER_SHA256) { throw 'Installer digest mismatch' }
           $report = "$pwd/installer-verification.json"
-          $process = Start-Process -FilePath "$pwd/RmsLink-Setup.exe" -ArgumentList @('--verify-payload', $report) -PassThru
+          $process = Start-Process -FilePath "$pwd/RmsLink-Setup.exe" -ArgumentList @('--install-test', $report) -PassThru
           if (-not $process.WaitForExit(90000)) { Stop-Process -Id $process.Id; throw 'Installer timed out' }
           if ($process.ExitCode -ne 0 -or -not (Test-Path $report)) { throw 'Installer startup failed' }
           $result = Get-Content $report | ConvertFrom-Json
           if (-not $result.passed) { throw 'Installer verification failed' }
-          @{ passed=$true; installerSha256=$sha; windows=[Environment]::OSVersion.VersionString; payloadFiles=$result.files; installerExecuted=$true; guiInstallPerformed=$false; physicalKeytechVerified=$false; checkedAt=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content $report -Encoding utf8
+          @{ passed=$true; installerSha256=$sha; windows=[Environment]::OSVersion.VersionString; installed=$result.installed; dashboardShortcut=$result.dashboardShortcut; connectionShortcut=$result.connectionShortcut; customIcon=$result.customIcon; installerExecuted=$true; guiInstallPerformed=$false; physicalKeytechVerified=$false; checkedAt=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content $report -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: rmslink-installer-verification
