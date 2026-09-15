@@ -75,7 +75,8 @@ public static class DesktopLinks
 {
     public static void Ensure(AppConfig cfg)
     {
-        var desktop=Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var desktop=Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory,Environment.SpecialFolderOption.Create);
+        Directory.CreateDirectory(desktop);
         var icon=Path.Combine(AppContext.BaseDirectory,"assets","dashboard.ico");
         File.WriteAllText(Path.Combine(desktop,"RmsLink 대시보드.url"),"[InternetShortcut]\r\nURL="+cfg.ServerUrl+"/\r\nIconFile="+icon+"\r\nIconIndex=0\r\n");
         var launcher=Path.Combine(AppConfig.InstallDir,"RmsLinkLauncher.exe");
