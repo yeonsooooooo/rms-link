@@ -225,6 +225,7 @@ export class ImprovementWorker {
       line,
       room,
       code,
+      now: "2026-09-15T12:10:00+09:00",
     }));
     const regression = await this.evaluate(
       {
