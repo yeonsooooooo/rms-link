@@ -78,7 +78,7 @@ public static class DesktopLinks
         var desktop=Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory,Environment.SpecialFolderOption.Create);
         Directory.CreateDirectory(desktop);
         var icon=Path.Combine(AppContext.BaseDirectory,"assets","dashboard.ico");
-        File.WriteAllText(Path.Combine(desktop,"RmsLink 대시보드.url"),"[InternetShortcut]\r\nURL="+cfg.ServerUrl+"/\r\nIconFile="+icon+"\r\nIconIndex=0\r\n");
+        File.WriteAllText(Path.Combine(desktop,"RmsLink 대시보드.url"),"[InternetShortcut]\r\nURL="+cfg.ServerUrl+"/\r\nIconFile="+icon+"\r\nIconIndex=0\r\n",System.Text.Encoding.Unicode);
         var launcher=Path.Combine(AppConfig.InstallDir,"RmsLinkLauncher.exe");
         Link(Path.Combine(desktop,"RmsLink 연결 설정.lnk"),File.Exists(launcher)?launcher:Application.ExecutablePath,"호텔 ID 확인 · 키텍 앱 선택",Path.Combine(AppContext.BaseDirectory,"assets","dashboard.ico"));
         if(cfg.SelectedApp==null)return;

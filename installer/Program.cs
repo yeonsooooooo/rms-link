@@ -31,7 +31,7 @@ static class Program
                     using var config=JsonDocument.Parse(File.ReadAllText(Path.Combine(Root,"bootstrap.json")));
                     string server=config.RootElement.GetProperty("serverUrl").GetString();
                     if(!Uri.TryCreate(server,UriKind.Absolute,out var uri)||uri.Scheme!="https")throw new Exception("대시보드 주소 오류");
-                    File.WriteAllText(Path.Combine(folder,"RmsLink 대시보드.url"),"[InternetShortcut]\r\nURL="+uri.GetLeftPart(UriPartial.Authority)+"/\r\nIconFile="+Path.Combine(Root,"versions",ReadCurrent(),"assets","dashboard.ico")+"\r\nIconIndex=0\r\n");
+                    File.WriteAllText(Path.Combine(folder,"RmsLink 대시보드.url"),"[InternetShortcut]\r\nURL="+uri.GetLeftPart(UriPartial.Authority)+"/\r\nIconFile="+Path.Combine(Root,"versions",ReadCurrent(),"assets","dashboard.ico")+"\r\nIconIndex=0\r\n",System.Text.Encoding.Unicode);
                 }
                 using var key=Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");key.SetValue("RmsLink","\""+Path.Combine(Root,"RmsLinkLauncher.exe")+"\"");
                 if(args.Length==2&&args[0]=="--install-test") {
