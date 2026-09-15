@@ -9,7 +9,7 @@ public sealed class WindowCapture:IDisposable
     {
         var image=new Bitmap(w.W,w.H,PixelFormat.Format32bppArgb);
         try {using var g=Graphics.FromImage(image);g.Clear(Color.Black);var hdc=g.GetHdc();bool ok;
-            try{ok=PrintWindow(new(w.Handle),hdc,2);}finally{g.ReleaseHdc(hdc);}
+            try{ok=PrintWindow(new(w.Handle),hdc,3);}finally{g.ReleaseHdc(hdc);}
             if(!ok)throw new Exception("WINDOW_CAPTURE_EMPTY: 앱이 창 캡처를 지원하지 않습니다");
             return image;
         }catch{image.Dispose();throw;}

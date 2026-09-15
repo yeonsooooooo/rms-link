@@ -10,6 +10,9 @@ public sealed record WindowCandidate(long Handle,string Process,string Title,int
 public static class WindowProbe
 {
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
+    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd,out RECT rect);
+    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd,ref POINT point);
+    [StructLayout(LayoutKind.Sequential)] struct POINT {public int X,Y;}
     [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback,IntPtr extra);
@@ -30,7 +33,7 @@ public static class WindowProbe
         var list=new List<WindowCandidate>();
         EnumWindows((h,_)=>{
             try {
-                if(!IsWindowVisible(h)||!GetWindowRect(h,out var r)||r.R-r.L<20||r.B-r.T<20)return true;
+                if(!IsWindowVisible(h)||!GetCaptureRect(h,out var r)||r.R-r.L<20||r.B-r.T<20)return true;
                 DwmGetWindowAttribute(h,14,out int cloaked,4);if(cloaked!=0)return true;
                 var title=new System.Text.StringBuilder(512);GetWindowText(h,title,512);if(title.Length==0)return true;
                 GetWindowThreadProcessId(h,out uint pid);using var p=Process.GetProcessById((int)pid);
@@ -65,7 +68,15 @@ public static class WindowProbe
         },IntPtr.Zero);
         return visible;
     }
-    public static bool SameGeometry(WindowCandidate selected)=>GetWindowRect(new(selected.Handle),out var r)&&r.L==selected.X&&r.T==selected.Y&&r.R-r.L==selected.W&&r.B-r.T==selected.H;
+    static bool GetCaptureRect(IntPtr handle,out RECT r)
+    {
+        // Capture the client area: invisible resize borders contain pixels from other apps.
+        if(IsIconic(handle))return GetWindowRect(handle,out r);
+        if(!GetClientRect(handle,out r))return false;var origin=new POINT();
+        if(!ClientToScreen(handle,ref origin))return false;
+        r.R+=origin.X;r.B+=origin.Y;r.L+=origin.X;r.T+=origin.Y;return true;
+    }
+    public static bool SameGeometry(WindowCandidate selected)=>GetCaptureRect(new(selected.Handle),out var r)&&r.L==selected.X&&r.T==selected.Y&&r.R-r.L==selected.W&&r.B-r.T==selected.H;
 
     public static List<string> ReadAccessibleRows(WindowCandidate window)
     {
