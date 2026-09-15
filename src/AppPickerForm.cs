@@ -1,3 +1,4 @@
+using RmsLink.Shared;
 using System.Diagnostics;
 namespace RmsLink;
 public sealed class AppPickerForm:Form
@@ -54,7 +55,7 @@ public sealed class AppPickerForm:Form
     {
         try{
             string target=path;
-            if(Path.GetExtension(path).Equals(".lnk",StringComparison.OrdinalIgnoreCase)) {dynamic shell=Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));dynamic shortcut=shell.CreateShortcut(path);try{target=(string)shortcut.TargetPath;}finally{System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shortcut);System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);}}
+            if(Path.GetExtension(path).Equals(".lnk",StringComparison.OrdinalIgnoreCase)) target=ShortcutFile.Read(path).Target;
             if(!Path.GetExtension(target).Equals(".exe",StringComparison.OrdinalIgnoreCase))throw new Exception("Windows 프로그램의 .lnk 또는 .exe를 선택하세요.");
             launchPath=path;executable=target;
             var running=WindowProbe.All().Where(w=>string.Equals(w.Executable,target,StringComparison.OrdinalIgnoreCase)).ToList();
@@ -85,14 +86,11 @@ public static class DesktopLinks
         string destination=Path.Combine(desktop,"키텍 앱.lnk"),source=cfg.SelectedApp.LaunchPath;
         if(Path.GetExtension(source).Equals(".lnk",StringComparison.OrdinalIgnoreCase)&&File.Exists(source)) {
             if(!string.Equals(Path.GetFullPath(source),Path.GetFullPath(destination),StringComparison.OrdinalIgnoreCase))File.Copy(source,destination,true);
-            dynamic shell=Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));dynamic shortcut=shell.CreateShortcut(destination);
-            try{shortcut.Description="키텍 객실 관리 앱 · RmsLink에서 선택한 프로그램";shortcut.IconLocation=Path.Combine(AppContext.BaseDirectory,"assets","keytech.ico")+",0";shortcut.Save();}finally{System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shortcut);System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);}
+            ShortcutFile.Brand(destination,"키텍 객실 관리 앱 · RmsLink에서 선택한 프로그램",Path.Combine(AppContext.BaseDirectory,"assets","keytech.ico"));
         } else Link(destination,cfg.SelectedApp.Executable,"키텍 객실 관리 앱",Path.Combine(AppContext.BaseDirectory,"assets","keytech.ico"));
     }
     static void Link(string path,string target,string description,string icon)
     {
-        dynamic shell=Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));dynamic link=shell.CreateShortcut(path);
-        try{link.TargetPath=target;link.WorkingDirectory=Path.GetDirectoryName(target);link.Description=description;link.IconLocation=icon+",0";link.Save();}
-        finally{System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link);System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);}
+        ShortcutFile.Create(path,target,description,icon);
     }
 }

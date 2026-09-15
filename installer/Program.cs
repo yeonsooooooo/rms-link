@@ -1,3 +1,4 @@
+using RmsLink.Shared;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
@@ -23,11 +24,10 @@ static class Program
                 foreach(var entry in zip.Entries){var target=Path.GetFullPath(Path.Combine(Root,entry.FullName));if(!target.StartsWith(Root+Path.DirectorySeparatorChar))throw new Exception("설치 경로 오류");if(entry.FullName.EndsWith('/'))continue;Directory.CreateDirectory(Path.GetDirectoryName(target));entry.ExtractToFile(target,true);}
                 using var manifest=JsonDocument.Parse(File.ReadAllText(Path.Combine(Root,"install.json")));
                 WriteCurrent(manifest.RootElement.GetProperty("version").GetString());
-                // Shortcut uses WScript.Shell through COM; no PowerShell required.
-                dynamic shell=Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+                // Unicode Windows shell API; no locale-dependent script host.
                 foreach(var folder in new[]{Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory,Environment.SpecialFolderOption.Create),Environment.GetFolderPath(Environment.SpecialFolder.Programs,Environment.SpecialFolderOption.Create)}) {
                     Directory.CreateDirectory(folder);
-                    dynamic shortcut=shell.CreateShortcut(Path.Combine(folder,"RmsLink 연결 설정.lnk"));shortcut.TargetPath=Path.Combine(Root,"RmsLinkLauncher.exe");shortcut.WorkingDirectory=Root;shortcut.Description="호텔 ID · 키텍 앱 선택";shortcut.IconLocation=Path.Combine(Root,"versions",ReadCurrent(),"assets","dashboard.ico")+",0";shortcut.Save();
+                    ShortcutFile.Create(Path.Combine(folder,"RmsLink 연결 설정.lnk"),Path.Combine(Root,"RmsLinkLauncher.exe"),"호텔 ID · 키텍 앱 선택",Path.Combine(Root,"versions",ReadCurrent(),"assets","dashboard.ico"));
                     using var config=JsonDocument.Parse(File.ReadAllText(Path.Combine(Root,"bootstrap.json")));
                     string server=config.RootElement.GetProperty("serverUrl").GetString();
                     if(!Uri.TryCreate(server,UriKind.Absolute,out var uri)||uri.Scheme!="https")throw new Exception("대시보드 주소 오류");
