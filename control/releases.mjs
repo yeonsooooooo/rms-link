@@ -79,6 +79,15 @@ export class ReleaseSync {
         run.conclusion !== "success"
       )
         return;
+      const head = (
+        await gh([
+          "api",
+          `repos/${repository}/commits/${encodeURIComponent(this.branch)}`,
+          "--jq",
+          ".sha",
+        ])
+      ).trim();
+      if (run.headSha !== head) return; // Never deploy an older success while the current revision is unverified.
       const key = "release-run-" + run.databaseId;
       if (s.get("SELECT key FROM settings WHERE key=?", key)) return;
       const folder = join(s.dir, "builds", String(run.databaseId));
