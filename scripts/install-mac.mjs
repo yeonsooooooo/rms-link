@@ -45,6 +45,7 @@ writeFileSync(
 spawnSync("launchctl", ["bootout", `gui/${process.getuid()}/${label}`], {
   stdio: "ignore",
 });
+await new Promise((r) => setTimeout(r, 1500));
 const result = spawnSync(
   "launchctl",
   ["bootstrap", `gui/${process.getuid()}`, plist],

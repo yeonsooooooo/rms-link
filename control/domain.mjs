@@ -177,6 +177,8 @@ export function stateForRoom(room, devices, now = Date.now()) {
     const fresh =
       device &&
       device.captureFresh !== false &&
+      device.online !== false &&
+      device.revoked !== 1 &&
       device.status !== "attention" &&
       now - Date.parse(device.last_seen) < 45000 &&
       now - Date.parse(data.at) < (data.kind === "snapshot" ? 60000 : 300000) &&

@@ -192,7 +192,14 @@ export class ImprovementWorker {
           profile,
           cases: cases.map((x) => ({
             line: x.line,
-            now: x.now ?? "2026-09-15T12:10:00+09:00",
+            now:
+              x.now ??
+              new Date(
+                Date.parse(x.created_at ?? new Date().toISOString()) +
+                  9 * 3600000,
+              )
+                .toISOString()
+                .replace("Z", "+09:00"),
           })),
         }),
         timeout: 15000,
