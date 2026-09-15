@@ -35,6 +35,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
           $report = "$pwd/runtime-test.json"
           $p = Start-Process publish/RmsLink.exe -ArgumentList @('--runtime-test', $report) -Wait -PassThru
+          if (Test-Path $report) { Get-Content $report }
           if ($p.ExitCode -ne 0 -or -not (Test-Path $report)) { throw 'Windows runtime test failed' }
           dotnet publish installer/Installer.csproj -c Release -r win-x64 --self-contained true -o launcher
           if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed' }
@@ -43,11 +44,14 @@ jobs:
           $version=([xml](Get-Content RmsLink.csproj)).Project.PropertyGroup.Version
           @{ passed=$true; version=$version; sha256=$hash; commit=$env:GITHUB_SHA; platform='windows-x64'; physicalKeytechVerified=$false; runtime=(Get-Content $report|ConvertFrom-Json) } | ConvertTo-Json -Depth 8 | Set-Content validation.json -Encoding utf8
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: rmslink-windows-validated
           path: |
             RmsLink.zip
             validation.json
             runtime-test.json
+            native-selected-window.png
+            native-app-picker.png
             launcher/RmsLinkLauncher.exe
           retention-days: 30
