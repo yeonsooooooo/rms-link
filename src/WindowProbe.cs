@@ -55,10 +55,18 @@ public static class WindowProbe
     {
         var area=new Rectangle(selected.X,selected.Y,selected.W,selected.H);
         if(!SystemInformation.VirtualScreen.Contains(area))return false;
-        // EnumWindows is top to bottom; reject any overlapping visible top-level window.
-        foreach(var w in All()) {if(w.Handle==selected.Handle)return true;if(!w.Minimized&&area.IntersectsWith(new(w.X,w.Y,w.W,w.H)))return false;}
-        return false;
+        // Include untitled popup windows too: they must never leak into a screen capture.
+        bool visible=false;
+        EnumWindows((handle,_)=>{
+            if(handle.ToInt64()==selected.Handle){visible=true;return false;}
+            if(!IsWindowVisible(handle)||IsIconic(handle)||!GetWindowRect(handle,out var r))return true;
+            DwmGetWindowAttribute(handle,14,out int cloaked,4);if(cloaked!=0)return true;
+            return !area.IntersectsWith(new Rectangle(r.L,r.T,Math.Max(0,r.R-r.L),Math.Max(0,r.B-r.T)));
+        },IntPtr.Zero);
+        return visible;
     }
+    public static bool SameGeometry(WindowCandidate selected)=>GetWindowRect(new(selected.Handle),out var r)&&r.L==selected.X&&r.T==selected.Y&&r.R-r.L==selected.W&&r.B-r.T==selected.H;
+
     public static List<string> ReadAccessibleRows(WindowCandidate window)
     {
         var root=AutomationElement.FromHandle(new IntPtr(window.Handle));
