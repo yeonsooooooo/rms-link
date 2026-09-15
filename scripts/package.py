@@ -5,7 +5,9 @@ ROOT=Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('--artifacts',type=Path,required=True);p.add_argument('--bootstrap',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--dotnet',default='/Users/ys/.local/share/rmslink-dotnet/dotnet');args=p.parse_args()
 report=json.loads((args.artifacts/'validation.json').read_text(encoding='utf-8-sig'));archive=args.artifacts/'RmsLink.zip'
 if not report['passed'] or not report['runtime']['passed'] or hashlib.sha256(archive.read_bytes()).hexdigest()!=report['sha256']:raise SystemExit('Windows validation/artifact mismatch')
-version=report['version'];work=ROOT/'.work/installer-payload';work.mkdir(parents=True,exist_ok=True)
+version=report['version'];work=ROOT/'.work/installer-payload'
+if work.exists():shutil.rmtree(work)
+work.mkdir(parents=True,exist_ok=True)
 app=work/'versions'/version
 if app.exists():shutil.rmtree(app)
 app.mkdir(parents=True)

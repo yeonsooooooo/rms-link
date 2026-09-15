@@ -1,29 +1,30 @@
 namespace RmsLink;
 public sealed class SetupForm:Form
 {
-    readonly AppConfig cfg; readonly TextBox hotel;readonly Label regions;readonly CheckBox auto,share;bool picked;
+    readonly AppConfig cfg;readonly TextBox hotel;readonly Label target;readonly CheckBox auto,share;bool picked;
     public SetupForm(AppConfig config)
     {
-        cfg=config;Text="RmsLink · 호텔 연결";StartPosition=FormStartPosition.CenterScreen;ClientSize=new(530,400);Font=new("맑은 고딕",10);FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;
-        var intro=new Label{Text="키텍 연동을 시작할 호텔 ID를 입력하세요.",Location=new(24,20),AutoSize=true,Font=new("맑은 고딕",13,FontStyle.Bold)};
-        var hint=new Label{Text="예: 9 또는 10 · 실행할 때마다 호텔을 확인합니다.",Location=new(24,59),AutoSize=true};
-        hotel=new(){Text="",PlaceholderText=string.IsNullOrEmpty(cfg.HotelId)?"hotel_id":"이전 호텔: "+cfg.HotelId,Location=new(24,85),Width=480};
-        regions=new(){Location=new(24,131),AutoSize=true};UpdateRegions();
-        var pick=new Button{Text="로그 영역 직접 지정",Location=new(24,161),Size=new(235,34)};pick.Click+=(_,_)=>Pick();
-        var detect=new Button{Text="RMS 창 자동 탐색 사용",Location=new(269,161),Size=new(235,34)};detect.Click+=(_,_)=>{cfg.Regions.Clear();UpdateRegions();};
-        share=new(){Text="선택한 RMS 화면·판독 내용을 맥 미니로 보내 진단",Checked=cfg.ShareEvidence,Location=new(24,213),AutoSize=true};
-        auto=new(){Text="Windows 로그인 시 실행 · 자동 업데이트",Checked=true,Location=new(24,245),AutoSize=true};
-        var note=new Label{Text="RMS 창이 하나이면 자동으로 찾습니다. 판독이 어려우면\n키텍 이벤트 로그 영역을 직접 지정해 주세요.",Location=new(24,276),Size=new(480,45),ForeColor=Color.DimGray};
-        var ok=new Button{Text="호텔 연결 시작",Location=new(24,336),Size=new(480,42),BackColor=Color.FromArgb(25,100,85),ForeColor=Color.White};
+        cfg=config;Text="RmsLink · 호텔과 키텍 연결";StartPosition=FormStartPosition.CenterScreen;ClientSize=new(620,490);Font=new("맑은 고딕",10);FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;
+        var intro=new Label{Text="호텔 ID를 입력하고 키텍 아이콘을 선택하세요.",Location=new(24,20),AutoSize=true,Font=new("맑은 고딕",13,FontStyle.Bold)};
+        var hint=new Label{Text="1. 호텔 ID · 실행할 때마다 호텔을 확인합니다.",Location=new(24,63),AutoSize=true};
+        hotel=new(){PlaceholderText=string.IsNullOrEmpty(cfg.HotelId)?"예: 9 또는 10":"이전 호텔: "+cfg.HotelId,Location=new(24,92),Width=565};
+        var pick=new Button{Text="2. 바탕화면 아이콘에서 키텍 앱 선택",Location=new(24,143),Size=new(565,45)};
+        pick.Click+=(_,_)=>{using var picker=new AppPickerForm();if(picker.ShowDialog()==DialogResult.OK){cfg.SelectedApp=picker.Selection;cfg.Regions.Clear();cfg.RegionsRelative=true;picked=true;UpdateTarget();}};
+        target=new(){Location=new(24,201),Size=new(565,58),ForeColor=Color.FromArgb(25,100,85)};UpdateTarget();
+        share=new(){Text="선택한 키텍 화면 이미지도 대시보드로 전송",Checked=cfg.ShareEvidence,Location=new(24,269),AutoSize=true};
+        auto=new(){Text="Windows 로그인 시 실행 · 자동 업데이트",Checked=cfg.AutoUpdate,Location=new(24,304),AutoSize=true};
+        var note=new Label{Text="선택한 앱의 화면만 추적합니다. 처음 연결 후 바탕화면에\n‘키텍 앱’, ‘RmsLink 대시보드’, ‘RmsLink 연결 설정’이 만들어집니다.",Location=new(24,345),Size=new(565,45),ForeColor=Color.DimGray};
+        var ok=new Button{Text="3. 이 호텔의 키텍 연결 시작",Location=new(24,413),Size=new(565,46),BackColor=Color.FromArgb(25,100,85),ForeColor=Color.White};
         ok.Click+=(_,_)=>{
-            var id=hotel.Text.Trim();if(!System.Text.RegularExpressions.Regex.IsMatch(id,@"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,49}$")){MessageBox.Show("hotel_id를 숫자 또는 영문·숫자·하이픈으로 입력해 주세요.");return;}
-            if(cfg.HotelId.Length>0&&cfg.HotelId!=id&&!picked)cfg.Regions.Clear();
-            cfg.HotelId=id;cfg.AutoUpdate=auto.Checked;cfg.ShareEvidence=share.Checked;cfg.Save();if(auto.Checked)AutoStart.Register();else AutoStart.Unregister();DialogResult=DialogResult.OK;Close();
+            var id=hotel.Text.Trim();if(!System.Text.RegularExpressions.Regex.IsMatch(id,@"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,49}$")){MessageBox.Show("호텔 ID를 숫자 또는 영문·숫자·하이픈으로 입력하세요.");return;}
+            if(cfg.SelectedApp==null || (cfg.HotelId.Length>0&&cfg.HotelId!=id&&!picked)){MessageBox.Show("이 호텔에서 사용할 키텍 앱을 직접 선택해 주세요.");return;}
+            cfg.HotelId=id;cfg.AutoUpdate=auto.Checked;cfg.ShareEvidence=share.Checked;cfg.Save();if(auto.Checked)AutoStart.Register();else AutoStart.Unregister();
+            try{DesktopLinks.Ensure(cfg);}catch(Exception ex){MessageBox.Show("연결은 저장했습니다. 바탕화면 바로가기 생성 실패: "+ex.Message);}
+            DialogResult=DialogResult.OK;Close();
         };
-        Controls.AddRange(new Control[]{intro,hint,hotel,regions,pick,detect,share,auto,note,ok});AcceptButton=ok;
+        Controls.AddRange(new Control[]{intro,hint,hotel,pick,target,share,auto,note,ok});AcceptButton=ok;
     }
-    void UpdateRegions()=>regions.Text=cfg.Regions.Count==0?"수집 방식: RMS 창 자동 탐색":"수집 방식: 지정 영역 "+cfg.Regions.Count+"개";
-    void Pick(){Hide();try{using var selector=new RoiSelectorForm();if(selector.ShowDialog()==DialogResult.OK){picked=true;var r=selector.SelectedScreenRect;cfg.Regions=new(){new(){X=r.X,Y=r.Y,W=r.Width,H=r.Height}};}}finally{Show();UpdateRegions();}}
+    void UpdateTarget()=>target.Text=cfg.SelectedApp==null?"아직 키텍 앱을 선택하지 않았습니다.":"선택됨: "+cfg.SelectedApp.Title+"\n"+Path.GetFileName(cfg.SelectedApp.Executable);
 }
 public static class AutoStart
 {

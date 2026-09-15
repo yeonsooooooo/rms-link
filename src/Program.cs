@@ -5,7 +5,8 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        if(args.Length==2 && args[0]=="--runtime-test")return Diagnostics.RuntimeTest(args[1]);
+        if(args.Contains("--capture-fixture"))return Diagnostics.CaptureFixture();
+        if(args.Length==2 && args[0]=="--runtime-test")return Diagnostics.RuntimeTest(args[1],true);
         // ---- CLI 모드 (UI 없이 실행, 설치 스크립트/원격 진단용) ----
         if (args.Any(a => a.Equals("--selftest", StringComparison.OrdinalIgnoreCase)))
             return Safe(() => Diagnostics.RunSelfTest(), 2);

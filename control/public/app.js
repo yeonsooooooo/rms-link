@@ -6,6 +6,10 @@ let state = null,
   live = false,
   err = "",
   modal = null;
+let loginRequired = false,
+  remote = false,
+  events = null,
+  refreshing = false;
 const escape = (s) =>
   String(s ?? "").replace(
     /[&<>"']/g,
@@ -49,7 +53,7 @@ const statusNames = {
   attention: "확인 필요",
   collecting: "수집 중",
   queued: "분석 대기",
-  analyzing: "Codex 분석 중",
+  analyzing: "화면 분석 중",
   diagnosed: "원인 분석 완료",
   needs_evidence: "확인 자료 필요",
   profile_published: "프로필 배포",
@@ -65,7 +69,14 @@ async function api(path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await r.json();
-  if (!r.ok) throw Error(data.error || "요청 실패");
+  if (!r.ok) {
+    if (r.status === 401 && path !== "/api/login") {
+      loginRequired = true;
+      state = null;
+      events?.close();
+    }
+    throw Error(data.error || "요청 실패");
+  }
   return data;
 }
 function toast(text) {
@@ -76,6 +87,8 @@ function toast(text) {
   setTimeout(() => el.remove(), 4500);
 }
 async function refresh() {
+  if (loginRequired || refreshing) return;
+  refreshing = true;
   try {
     state = await api(
       "/api/state" +
@@ -86,6 +99,8 @@ async function refresh() {
   } catch (e) {
     err = e.message;
     render();
+  } finally {
+    refreshing = false;
   }
 }
 const empty = (title, text, icon = "⌁", action = "") =>
@@ -116,13 +131,13 @@ function roomsPanel() {
   return `<section class="panel"><div class="panel-head"><div><h2>객실별 키텍 상태 <span class="sub">${state.rooms.length}개 객실</span></h2><p class="sub">문 상태와 키 상태는 각각의 관측 시각을 기준으로 표시합니다.</p></div>${badge("현재 화면 · 이벤트 근거 구분", "blue")}</div>${state.rooms.length ? `<div class="room-grid">${state.rooms.map((r) => `<div class="room"><strong>${escape(r.room)} <span class="sub">호</span></strong><div class="room-row">문 상태 ${roomField(r.door)}</div><div class="room-row">키 상태 ${roomField(r.key)}</div><small>호텔 ${escape(r.hotelId)} · ${escape(r.key.reason)}</small><small>키 근거 ${when(r.key.at)}</small><small>문 근거 ${when(r.door.at)}</small></div>`).join("")}</div>` : empty("확인된 객실 정보가 아직 없습니다", "문 열림·닫힘, 키 삽입·제거가 관측되면<br>객실별로 상태와 근거 시각을 표시합니다.", "▦")}<div class="notice">이벤트 로그는 마지막 이벤트에서 추정한 상태입니다. 현재 화면 관측은 1분, 이벤트 근거는 5분이 지나거나 기기 연결이 끊기면 ‘오래된 관측’으로 바뀝니다.</div></section>`;
 }
 function jobsPanel() {
-  return `<section class="panel"><div class="panel-head"><div><h2>개선 진행 현황</h2><p class="sub">관측 → 원인 분석 → 검증 → 자동 업데이트</p></div>${badge(state.worker.enabled ? "자동 분석 켜짐" : "자동 분석 꺼짐", "green")}</div><div class="flow"><span>01 수집</span>→<span>02 Codex 분석</span>→<span>03 검증</span>→<span>04 배포</span></div>${
+  return `<section class="panel"><div class="panel-head"><div><h2>개선 진행 현황</h2><p class="sub">관측 → 원인 분석 → 검증 → 자동 업데이트</p></div>${badge(state.worker.enabled ? "자동 분석 켜짐" : "자동 분석 꺼짐", "green")}</div><div class="flow"><span>01 수집</span>→<span>02 화면 분석</span>→<span>03 검증</span>→<span>04 배포</span></div>${
     state.jobs.length
       ? `<div class="timeline">${state.jobs
           .slice(0, 6)
           .map(
             (j) =>
-              `<div class="timeline-item"><b>호텔 ${escape(j.hotel_id)} · ${statusNames[j.status] || escape(j.status)}</b><small>${when(j.updated_at)}</small><div>${escape(j.result?.summary || "맥 미니 분석 대기열에 등록되었습니다.")}</div>${j.result?.action ? `<p>${escape(j.result.action)}</p>` : ""}${j.result?.aliases?.length ? `<button data-job="${j.id}" data-action="job-details">제안 규칙과 근거 보기</button>` : ""}</div>`,
+              `<div class="timeline-item"><b>호텔 ${escape(j.hotel_id)} · ${statusNames[j.status] || escape(j.status)}</b><small>${when(j.updated_at)}</small><div>${escape(j.result?.summary || "관리 서버 분석 대기열에 등록되었습니다.")}</div>${j.result?.action ? `<p>${escape(j.result.action)}</p>` : ""}${j.result?.aliases?.length ? `<button data-job="${j.id}" data-action="job-details">제안 규칙과 근거 보기</button>` : ""}</div>`,
           )
           .join("")}</div>`
       : empty(
@@ -153,12 +168,21 @@ function detailPanel() {
   const d = state.devices.find((x) => x.id === selectedDevice);
   if (!d) return "";
   const o = d.batch?.observation;
-  return `<section class="panel"><div class="panel-head"><h2>호텔 ${escape(d.hotel_id)} · ${escape(d.machine)}</h2><button data-action="close-detail">닫기 ×</button></div><div class="detail"><div class="actions"><button class="primary" data-action="analyze" data-id="${d.id}">Codex로 지금 분석</button><button data-action="profile" data-hotel="${escape(d.hotel_id)}">호텔별 규칙 편집</button><button data-action="label" data-hotel="${escape(d.hotel_id)}">확인한 판독 샘플 등록</button></div>${d.diagnosis.map((x) => `<div class="errorbanner"><b>${escape(x.title)}</b><br>${escape(x.action)}<p>${escape(x.detail)}</p></div>`).join("")}<p>업데이트: ${escape(d.update_status || "아직 보고되지 않음")} · 화면 관측 ${when(d.batch?.captured_at)}</p>${d.evidence ? `<img src="/api/evidence/${d.evidence.id}" alt="호텔 ${escape(d.hotel_id)}에서 전송한 RMS 수집 화면">` : '<div class="notice">전송된 화면 이미지가 없습니다. 기기에서 진단 화면 공유 여부를 확인해 주세요.</div>'}<h3>판독 원문과 실패 사유</h3><pre>${escape((o?.lines ?? []).map((l) => `${l.room || "—"}  ${l.code ? labels[l.code] || l.code : l.reason}  │ ${l.text}`).join("\n") || "판독 내용이 아직 없습니다.")}</pre><h3>Windows 환경</h3><pre>${escape(JSON.stringify({ os: o?.os, source: o?.source, ocrLanguage: o?.ocrLanguage, desktopAvailable: o?.desktopAvailable, remoteSession: o?.remoteSession, windows: o?.windows, regions: o?.regions }, null, 2))}</pre></div></section>`;
+  const staleImage =
+    !d.online ||
+    !d.captureFresh ||
+    Date.now() - Date.parse(d.evidence?.captured_at) > 15000 ||
+    (o?.errors?.length && !o.errors.every((e) => e.startsWith("UIA_")));
+  return `<section class="panel"><div class="panel-head"><h2>호텔 ${escape(d.hotel_id)} · ${escape(d.machine)}</h2><button data-action="close-detail">닫기 ×</button></div><div class="detail"><div class="actions"><button class="primary" data-action="analyze" data-id="${d.id}">지금 화면 분석</button><button data-action="profile" data-hotel="${escape(d.hotel_id)}">호텔별 규칙 편집</button><button data-action="label" data-hotel="${escape(d.hotel_id)}">확인한 판독 샘플 등록</button></div>${d.diagnosis.map((x) => `<div class="errorbanner"><b>${escape(x.title)}</b><br>${escape(x.action)}<p>${escape(x.detail)}</p></div>`).join("")}<div class="notice"><b>선택한 키텍 앱: ${escape(o?.selectedApp?.name || o?.windows?.[0]?.title || "앱 선택 대기")}</b><br>실행 프로그램: ${escape(o?.selectedApp?.process || o?.windows?.[0]?.process || "—")} · 화면 수집 ${ago(d.batch?.captured_at)}<br>이미지: ${d.evidence ? when(d.evidence.captured_at) : "수신 대기"} ${d.evidence ? badge(staleImage ? "마지막 저장 화면 · 현재 화면 확인 필요" : "최근 수집 화면", staleImage ? "amber" : "green") : ""}<br>화면 이미지는 최대 5초 간격, 텍스트는 기본 1.5초 간격으로 수집합니다.</div><p>업데이트: ${escape(d.update_status || "아직 보고되지 않음")} · 화면 관측 ${when(d.batch?.captured_at)}</p>${d.evidence ? `<img src="/api/evidence/${d.evidence.id}" alt="호텔 ${escape(d.hotel_id)}에서 전송한 RMS 수집 화면">` : '<div class="notice">전송된 화면 이미지가 없습니다. 기기에서 진단 화면 공유 여부를 확인해 주세요.</div>'}<h3>판독 원문과 실패 사유</h3><pre>${escape((o?.lines ?? []).map((l) => `${l.room || "—"}  ${l.code ? labels[l.code] || l.code : l.reason}  │ ${l.text}`).join("\n") || "판독 내용이 아직 없습니다.")}</pre><h3>Windows 환경</h3><pre>${escape(JSON.stringify({ os: o?.os, source: o?.source, ocrLanguage: o?.ocrLanguage, desktopAvailable: o?.desktopAvailable, remoteSession: o?.remoteSession, windows: o?.windows, regions: o?.regions }, null, 2))}</pre></div></section>`;
 }
 function updatesPanel() {
   return `<section class="panel"><div class="panel-head"><h2>앱 업데이트</h2>${badge("서명 · 무결성 검사", "green")}</div>${state.releases.length ? `<div class="table-scroll"><table><thead><tr><th>버전</th><th>상태</th><th>패키지</th><th>준비 시각</th></tr></thead><tbody>${state.releases.map((r) => `<tr><td><strong>${escape(r.version)}</strong></td><td>${badge(r.status === "active" ? "자동 업데이트 제공" : r.status, "green")}</td><td>${(r.size / 1024 / 1024).toFixed(1)} MB<small>SHA-256 ${r.sha256.slice(0, 20)}…</small></td><td>${when(r.created_at)}</td></tr>`).join("")}</tbody></table></div>` : empty("검증된 앱 패키지를 준비하고 있습니다", "배포되면 설치된 RmsLink가 자동으로 최신 버전을 확인합니다.", "↓")}<div class="notice">앱은 2분마다 업데이트를 확인합니다. Windows 트레이 메뉴의 ‘지금 업데이트 확인 · 적용’으로 수동 업데이트도 가능합니다. 새 앱 실행 확인에 실패하면 이전 버전으로 복구합니다.</div></section><section class="panel"><div class="panel-head"><h2>호텔별 판독 규칙</h2></div>${state.profiles.length ? `<div class="table-scroll"><table><thead><tr><th>호텔</th><th>규칙</th><th>상태</th><th>배포 시각</th><th></th></tr></thead><tbody>${state.profiles.map((p) => `<tr><td>${escape(p.hotel_id)}</td><td>${escape(p.body.name)} · r${p.revision}</td><td>${badge(p.status === "active" ? "현재 배포" : "이전 규칙", p.status === "active" ? "green" : "")}</td><td>${when(p.created_at)}</td><td>${p.status !== "active" ? `<button data-action="rollback" data-hotel="${escape(p.hotel_id)}" data-revision="${p.revision}">이 규칙으로 복구</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : empty("공통 키텍 규칙으로 시작합니다", "호텔별 차이가 확인되면 해당 호텔에만 새 규칙을 적용합니다.", "◇")}</section>`;
 }
 function render() {
+  if (loginRequired) {
+    root.innerHTML = `<main class="login"><section class="panel detail"><img src="/icon.svg" width="64" alt="RmsLink"><h1>RmsLink 대시보드</h1><p>접속 코드를 입력하면 호텔 현황과 실시간 수집 화면을 확인할 수 있습니다.</p><form id="login-form"><label for="access-code">대시보드 접속 코드</label><input id="access-code" type="password" autocomplete="current-password" required maxlength="128"><button class="primary">대시보드 접속</button></form>${err ? `<p role="alert">${escape(err)}</p>` : ""}<p class="sub">접속 코드는 관리 담당자에게 받을 수 있습니다. 로그인은 12시간 동안 유지됩니다.</p></section></main>`;
+    return;
+  }
   if (!state) {
     root.innerHTML = `<main><div class="empty">${err ? escape(err) : "RmsLink 관제를 연결하고 있습니다…"}</div></main>`;
     return;
@@ -181,7 +205,7 @@ function render() {
     )
     .join(
       "",
-    )}</div><div class="aside-bottom"><span class="dot"></span>Mac mini control center<br>키텍 연동 · 지속 개선 시스템<br><span class="sub">Windows agent v0.2</span></div></aside><main><header><span class="breadcrumb">워크스페이스 <strong>/ ${views[view]}</strong></span><span class="live"><span class="dot ${live ? "" : "warn"}"></span>${live ? "실시간 연결" : "다시 연결 중"}</span></header><div class="topline"><div><div class="eyebrow">KEYTECH INTEGRATION</div><h1>${view === "overview" ? "호텔 키텍 연동 현황" : views[view]}</h1><p class="sub">각 호텔의 연결부터 객실 상태, 개선과 업데이트까지 한곳에서 확인하세요.</p></div><div class="actions"><button data-action="refresh">↻ 새로고침</button><button data-action="download" class="primary">↓ Windows 설치 파일</button></div></div>${err ? `<div class="errorbanner">${escape(err)}</div>` : ""}<div class="metrics">${[
+    )}</div><div class="aside-bottom"><span class="dot"></span>호텔 통합 관제<br>키텍 연동 · 지속 개선 시스템<br>${remote ? '<button data-action="logout">로그아웃</button><br>' : ""}<span class="sub">키텍 실시간 연결</span></div></aside><main><header><span class="breadcrumb">워크스페이스 <strong>/ ${views[view]}</strong></span><span class="live"><span class="dot ${live ? "" : "warn"}"></span>${live ? "실시간 연결" : "다시 연결 중"}</span></header><div class="topline"><div><div class="eyebrow">KEYTECH INTEGRATION</div><h1>${view === "overview" ? "호텔 키텍 연동 현황" : views[view]}</h1><p class="sub">각 호텔의 연결부터 객실 상태, 개선과 업데이트까지 한곳에서 확인하세요.</p></div><div class="actions"><button data-action="guide">설정·분석 매뉴얼</button><button data-action="access">외부 접속 · 바로가기</button><button data-action="refresh">↻ 새로고침</button><button data-action="download" class="primary">↓ Windows 설치 파일</button></div></div>${err ? `<div class="errorbanner">${escape(err)}</div>` : ""}<div class="metrics">${[
     ["연결된 기기", online, `등록된 기기 ${devices.length}대`, "⌘"],
     [
       "키텍 수집 중",
@@ -258,7 +282,7 @@ root.addEventListener("click", async (e) => {
         const link = await api("/api/installer-link");
         openModal(
           "Windows에 RmsLink 설치",
-          `<p class="sub">설치 파일을 Windows PC로 옮겨 실행한 뒤 hotel_id를 입력하세요. 등록권은 발급 후 7일간, 최대 100대에 사용할 수 있습니다.</p><label>Windows용 다운로드 주소<input readonly id="download-link" value="${escape(link.url)}"></label><div class="actions"><button id="copy-link">주소 복사</button><a class="button primary" href="/api/installer">이 Mac에 다운로드</a></div><div class="notice">현재 현장 시험본은 Windows 공인 코드 서명이 없습니다. 보안 차단이 나타나면 차단 내용을 확인해 주세요. 한국어 OCR이 없으면 앱에서 진단 원인이 표시됩니다.</div>`,
+          `<p class="sub">설치 파일을 Windows PC로 옮겨 실행한 뒤 hotel_id를 입력하세요. 등록권은 발급 후 7일간, 최대 100대에 사용할 수 있습니다.</p><label>Windows용 다운로드 주소<input readonly id="download-link" value="${escape(link.url)}"></label><div class="actions"><button id="copy-link">주소 복사</button><a class="button primary" href="/api/installer">이 기기에 다운로드</a></div><div class="notice">현재 현장 시험본은 Windows 공인 코드 서명이 없습니다. 보안 차단이 나타나면 차단 내용을 확인해 주세요. 한국어 OCR이 없으면 앱에서 진단 원인이 표시됩니다.</div>`,
         );
         modal.querySelector("#copy-link").onclick = async () => {
           await navigator.clipboard.writeText(link.url);
@@ -266,15 +290,36 @@ root.addEventListener("click", async (e) => {
         };
         break;
       case "guide":
-        openModal(
-          "설치와 현장 확인",
-          `<div class="detail"><p>1. Windows 10 1809 이상, x64 PC에서 설치 파일 실행</p><p>2. 호텔 ID 입력 → 호텔 연결 시작</p><p>3. 키텍/RMS 창이 하나이면 자동 탐색합니다. 필요하면 로그 영역을 직접 지정하세요.</p><p>4. 시험 객실의 문을 열고 닫고, 키를 넣고 빼며 대시보드 이벤트를 대조하세요.</p><p>5. 맞지 않는 원문은 ‘확인한 판독 샘플 등록’으로 기록합니다. 검증된 호텔 규칙은 자동 업데이트됩니다.</p></div>`,
-        );
+        window.open("/manual.html", "_blank", "noopener");
         break;
+      case "logout":
+        await api("/api/logout", {});
+        events?.close();
+        loginRequired = true;
+        state = null;
+        err = "";
+        render();
+        break;
+      case "access": {
+        const access = remote
+          ? { publicOrigin: state.access.publicOrigin }
+          : await api("/api/access");
+        openModal(
+          "외부 접속 · 바탕화면 바로가기",
+          `<p>어디에서 접속하든 같은 호텔 데이터가 표시됩니다.</p><label>대시보드 주소<input readonly value="${escape(access.publicOrigin)}/"></label>${access.code ? `<label>관리자 접속 코드<input type="password" id="remote-code" readonly value="${escape(access.code)}"></label><button id="show-code">접속 코드 표시</button>` : ""}<p class="sub">접속 코드는 운영 담당자에게만 전달하세요. 바로가기 파일에는 코드가 포함되지 않습니다.</p><a class="button primary" href="/api/shortcut">Windows 바탕화면 바로가기 다운로드</a><p class="sub">다운로드한 파일을 바탕화면으로 옮기세요.</p>`,
+        );
+        const show = modal.querySelector("#show-code");
+        if (show)
+          show.onclick = () => {
+            modal.querySelector("#remote-code").type = "text";
+            show.remove();
+          };
+        break;
+      }
       case "analyze":
         const r = await api("/api/analyze", { deviceId: el.dataset.id });
         toast(
-          r.queued ? "Codex 분석을 요청했습니다." : r.reason || "분석 대기 중",
+          r.queued ? "화면 분석을 요청했습니다." : r.reason || "분석 대기 중",
         );
         await refresh();
         break;
@@ -349,7 +394,7 @@ root.addEventListener("click", async (e) => {
       case "job-details": {
         const j = state.jobs.find((j) => j.id === el.dataset.job);
         openModal(
-          "Codex 분석 근거",
+          "화면 분석 근거",
           `<div class="detail"><pre>${escape(JSON.stringify(j.result, null, 2))}</pre></div>`,
         );
         break;
@@ -359,31 +404,59 @@ root.addEventListener("click", async (e) => {
     toast(e.message);
   }
 });
-try {
-  await api("/api/bootstrap", {});
-  await refresh();
-  const events = new EventSource("/api/events");
+root.addEventListener("submit", async (e) => {
+  if (e.target.id !== "login-form") return;
+  e.preventDefault();
+  const password = document.querySelector("#access-code").value;
+  try {
+    await api("/api/login", { password });
+    loginRequired = false;
+    err = "";
+    await refresh();
+    connect();
+  } catch (error) {
+    err = error.message;
+    render();
+  }
+});
+function connect() {
+  events?.close();
+  events = new EventSource("/api/events");
+  let pending;
   events.addEventListener("ready", () => {
     live = true;
     render();
   });
-  let pending;
   events.addEventListener("change", () => {
-    clearTimeout(pending);
-    pending = setTimeout(refresh, 180);
+    if (pending) return;
+    pending = setTimeout(() => {
+      pending = null;
+      refresh();
+    }, 300);
   });
   events.onerror = () => {
     live = false;
     render();
+    refresh();
   };
   events.onopen = () => {
     live = true;
     render();
   };
+}
+try {
+  const session = await api("/api/bootstrap", {});
+  loginRequired = !!session.loginRequired;
+  remote = !!session.remote;
+  if (loginRequired) render();
+  else {
+    await refresh();
+    connect();
+  }
 } catch (e) {
   err = e.message;
   render();
 }
 setInterval(() => {
-  if (!modal) refresh();
-}, 15000);
+  if (!modal && !loginRequired) refresh();
+}, 5000);

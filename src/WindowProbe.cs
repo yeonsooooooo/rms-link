@@ -2,25 +2,62 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
 namespace RmsLink;
-public sealed record WindowCandidate(long Handle,string Process,string Title,int X,int Y,int W,int H,bool Minimized);
+public sealed record WindowCandidate(long Handle,string Process,string Title,int X,int Y,int W,int H,bool Minimized)
+{
+    [System.Text.Json.Serialization.JsonIgnore] public string Executable {get;init;}="";
+    [System.Text.Json.Serialization.JsonIgnore] public int ProcessId {get;init;}
+}
 public static class WindowProbe
 {
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
     [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback,IntPtr extra);
+    delegate bool EnumProc(IntPtr hwnd,IntPtr extra);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint id);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd,System.Text.StringBuilder text,int size);
     [DllImport("user32.dll")] static extern IntPtr OpenInputDesktop(uint flags,bool inherit,uint access);
     [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr desktop);
+    [DllImport("user32.dll")] static extern bool SwitchDesktop(IntPtr desktop);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd,int command);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd,int attribute,out int value,int size);
     [StructLayout(LayoutKind.Sequential)] struct RECT {public int L,T,R,B;}
-    public static bool DesktopAvailable(){var d=OpenInputDesktop(0,false,0x0100);if(d==IntPtr.Zero)return false;CloseDesktop(d);return true;}
-    public static List<WindowCandidate> Find()
+    public static bool DesktopAvailable(){var d=OpenInputDesktop(0,false,0x0100);if(d==IntPtr.Zero)return false;try{return SwitchDesktop(d);}finally{CloseDesktop(d);}}
+    public static void Activate(WindowCandidate w){ShowWindow(new(w.Handle),9);SetForegroundWindow(new(w.Handle));}
+    public static List<WindowCandidate> All()
     {
         var list=new List<WindowCandidate>();
-        foreach(var p in Process.GetProcesses()) using(p) try {
-            if(p.MainWindowHandle==IntPtr.Zero || p.ProcessName.StartsWith("RmsLink",StringComparison.OrdinalIgnoreCase))continue;
-            string t=p.MainWindowTitle;
-            if(!System.Text.RegularExpressions.Regex.IsMatch(p.ProcessName+" "+t,@"keyte[ch]*|키텍|객실관리|객실 관리|\bRMS\w*|ROMASYS|UBSYS|SeeReal|MIRAE|A/S Call",System.Text.RegularExpressions.RegexOptions.IgnoreCase))continue;
-            if(GetWindowRect(p.MainWindowHandle,out var r))list.Add(new(p.MainWindowHandle.ToInt64(),p.ProcessName,t[..Math.Min(t.Length,160)],r.L,r.T,r.R-r.L,r.B-r.T,IsIconic(p.MainWindowHandle)));
-        }catch{}
-        return list.Take(10).ToList();
+        EnumWindows((h,_)=>{
+            try {
+                if(!IsWindowVisible(h)||!GetWindowRect(h,out var r)||r.R-r.L<20||r.B-r.T<20)return true;
+                DwmGetWindowAttribute(h,14,out int cloaked,4);if(cloaked!=0)return true;
+                var title=new System.Text.StringBuilder(512);GetWindowText(h,title,512);if(title.Length==0)return true;
+                GetWindowThreadProcessId(h,out uint pid);using var p=Process.GetProcessById((int)pid);
+                string path="";try{path=p.MainModule?.FileName??"";}catch{}
+                list.Add(new(h.ToInt64(),p.ProcessName,title.ToString()[..Math.Min(title.Length,160)],r.L,r.T,r.R-r.L,r.B-r.T,IsIconic(h)){Executable=path,ProcessId=(int)pid});
+            }catch{}return true;
+        },IntPtr.Zero);
+        return list;
+    }
+    public static List<WindowCandidate> Find()=>All().Where(w=>!w.Process.StartsWith("RmsLink",StringComparison.OrdinalIgnoreCase)&&System.Text.RegularExpressions.Regex.IsMatch(w.Process+" "+w.Title,@"keyte[ch]*|키텍|객실관리|객실 관리|\bRMS\w*|ROMASYS|UBSYS|SeeReal|MIRAE",System.Text.RegularExpressions.RegexOptions.IgnoreCase)).Take(10).ToList();
+    public static List<WindowCandidate> Find(SelectedApplication app)
+    {
+        if(app==null)return new();
+        // Executable identity survives a restart. Never fall back to a different application.
+        var matching=All().Where(w=>!string.IsNullOrEmpty(app.Executable) && string.Equals(w.Executable,app.Executable,StringComparison.OrdinalIgnoreCase)).ToList();
+        var exact=matching.FirstOrDefault(w=>w.Handle==app.Handle&&w.ProcessId==app.ProcessId);
+        if(exact!=null)return new(){exact};
+        if(matching.Count>1){var title=matching.Where(w=>w.Title==app.Title).ToList();if(title.Count==1)return title;}
+        return matching.Take(10).ToList();
+    }
+    public static bool Unobscured(WindowCandidate selected)
+    {
+        var area=new Rectangle(selected.X,selected.Y,selected.W,selected.H);
+        if(!SystemInformation.VirtualScreen.Contains(area))return false;
+        // EnumWindows is top to bottom; reject any overlapping visible top-level window.
+        foreach(var w in All()) {if(w.Handle==selected.Handle)return true;if(!w.Minimized&&area.IntersectsWith(new(w.X,w.Y,w.W,w.H)))return false;}
+        return false;
     }
     public static List<string> ReadAccessibleRows(WindowCandidate window)
     {

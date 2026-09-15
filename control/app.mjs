@@ -1,3 +1,4 @@
+import { DashboardAuth } from "./auth.mjs";
 import { createServer } from "node:http";
 import { readFileSync, existsSync, statSync, createReadStream } from "node:fs";
 import { join, extname, resolve } from "node:path";
@@ -12,6 +13,8 @@ export async function createApp({
   directory = resolve(".data"),
   adminPort = 18760,
   agentPort = 18761,
+  publicOrigin = process.env.RMSLINK_PUBLIC_ORIGIN ??
+    "https://ys-macmini.tail984bfd.ts.net:8443",
   autoAnalyze = true,
   autoRelease = false,
   corePath = process.env.RMSLINK_CORE,
@@ -20,10 +23,19 @@ export async function createApp({
   const store = new Store(directory),
     subscribers = new Set(),
     rate = new Map();
+  const auth = new DashboardAuth(store);
+  if (
+    new URL(publicOrigin).protocol !== "https:" ||
+    new URL(publicOrigin).origin !== publicOrigin
+  )
+    throw Error("외부 HTTPS origin 설정 오류");
   let ownOrigin;
   const broadcast = () => {
     for (const res of subscribers)
-      if (!res.write("event: change\ndata: {}\n\n")) {
+      if (
+        (res.remoteSession && !auth.valid(res.remoteSession)) ||
+        !res.write("event: change\ndata: {}\n\n")
+      ) {
         subscribers.delete(res);
         res.destroy();
       }
@@ -88,40 +100,77 @@ export async function createApp({
     try {
       const url = new URL(req.url, "http://localhost");
       const token = req.headers.authorization?.replace(/^Bearer /, "");
-      if (admin) {
+      const remote =
+        !admin &&
+        (url.pathname === "/" ||
+          url.pathname.startsWith("/api/") ||
+          ["/app.js", "/style.css", "/icon.svg", "/manual.html"].includes(
+            url.pathname,
+          ));
+      if (admin || remote) {
+        const expectedOrigin = remote ? publicOrigin : ownOrigin;
         if (
-          req.headers.host !== new URL(ownOrigin).host ||
-          (req.headers.origin && req.headers.origin !== ownOrigin)
+          req.headers.host !== new URL(expectedOrigin).host ||
+          (req.headers.origin && req.headers.origin !== expectedOrigin)
         ) {
           json({ error: "허용하지 않는 출처" }, 403);
           return;
         }
-        if (url.pathname === "/api/bootstrap" && req.method === "POST") {
+        const cookie = req.headers.cookie?.match(
+          /(?:^|;\s*)rmslink_session=([^;]+)/,
+        )?.[1];
+        const authenticated = remote
+          ? auth.valid(cookie)
+          : safeEqual(token, store.adminToken) ||
+            safeEqual(cookie, store.adminToken) ||
+            auth.valid(cookie);
+        if (
+          ["/api/bootstrap", "/api/login", "/api/logout"].includes(
+            url.pathname,
+          ) &&
+          req.method === "POST"
+        ) {
           if (
             req.headers["x-rmslink-client"] !== "1" ||
             req.headers["sec-fetch-site"] === "cross-site"
-          ) {
-            json({ error: "맥 미니 관제에서 열어 주세요." }, 403);
-            return;
+          )
+            return json({ error: "허용하지 않는 요청" }, 403);
+          if (url.pathname === "/api/logout") {
+            auth.logout(cookie);
+            res.setHeader(
+              "Set-Cookie",
+              `rmslink_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${remote ? "; Secure" : ""}`,
+            );
+            broadcast();
+            return json({ ok: true });
           }
+          if (url.pathname === "/api/login") {
+            const input = z
+              .object({ password: z.string().max(128) })
+              .parse(await body());
+            const result = auth.login(input.password);
+            if (result.error)
+              return json({ error: result.error }, result.status);
+            res.setHeader(
+              "Set-Cookie",
+              `rmslink_session=${result.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${remote ? "; Secure" : ""}`,
+            );
+            return json({ ok: true });
+          }
+          if (remote)
+            return json({
+              ok: authenticated,
+              loginRequired: !authenticated,
+              remote: true,
+            });
           res.setHeader(
             "Set-Cookie",
             `rmslink_session=${store.adminToken}; Path=/; HttpOnly; SameSite=Strict`,
           );
-          json({ ok: true });
-          return;
+          return json({ ok: true, remote: false });
         }
         if (url.pathname.startsWith("/api/")) {
-          const cookie = req.headers.cookie?.match(
-            /(?:^|;\s*)rmslink_session=([^;]+)/,
-          )?.[1];
-          if (
-            !safeEqual(token, store.adminToken) &&
-            !safeEqual(cookie, store.adminToken)
-          ) {
-            json({ error: "인증 필요" }, 401);
-            return;
-          }
+          if (!authenticated) return json({ error: "인증 필요" }, 401);
           if (req.method !== "GET" && req.headers["x-rmslink-client"] !== "1") {
             json({ error: "요청 헤더 필요" }, 403);
             return;
@@ -132,6 +181,7 @@ export async function createApp({
               Connection: "keep-alive",
             });
             res.write("event: ready\ndata: {}\n\n");
+            if (remote) res.remoteSession = cookie;
             subscribers.add(res);
             req.on("close", () => subscribers.delete(res));
             return;
@@ -141,11 +191,28 @@ export async function createApp({
             json({
               ...store.snapshot(hotel ? id.parse(hotel) : undefined),
               worker: worker.status(),
+              access: { publicOrigin, remote },
               installer: existsSync(join(directory, "installer.exe"))
                 ? { available: true }
                 : null,
             });
             return;
+          }
+          if (url.pathname === "/api/access" && req.method === "GET") {
+            if (remote)
+              return json(
+                { error: "서버 컴퓨터에서 접속 코드를 확인해 주세요." },
+                403,
+              );
+            return json({ publicOrigin, code: auth.key });
+          }
+          if (url.pathname === "/api/shortcut" && req.method === "GET") {
+            res.writeHead(200, {
+              "Content-Type": "application/internet-shortcut",
+              "Content-Disposition":
+                "attachment; filename=RmsLink-Dashboard.url",
+            });
+            return res.end(`[InternetShortcut]\r\nURL=${publicOrigin}/\r\n`);
           }
           if (url.pathname === "/api/installer" && req.method === "GET") {
             const f = join(directory, "installer.exe");
@@ -163,7 +230,7 @@ export async function createApp({
           }
           if (url.pathname === "/api/installer-link" && req.method === "GET") {
             json({
-              url: `https://ys-macmini.tail984bfd.ts.net:8443/download/${store.downloadToken}/RmsLink-Setup.exe`,
+              url: `${publicOrigin}/download/${store.downloadToken}/RmsLink-Setup.exe`,
             });
             return;
           }
@@ -264,6 +331,8 @@ export async function createApp({
           "/": "index.html",
           "/app.js": "app.js",
           "/style.css": "style.css",
+          "/icon.svg": "icon.svg",
+          "/manual.html": "manual.html",
         };
         const file = files[url.pathname];
         if (!file) {
@@ -275,12 +344,13 @@ export async function createApp({
             ".html": "text/html; charset=utf-8",
             ".js": "text/javascript; charset=utf-8",
             ".css": "text/css; charset=utf-8",
+            ".svg": "image/svg+xml",
           }[extname(file)],
         });
         res.end(readFileSync(join(publicDir, file)));
         return;
       }
-      // Public listener has no dashboard or administrator routes.
+      // Agent credentials are separate from authenticated dashboard sessions.
       const key = digest(token ?? req.socket.remoteAddress ?? "anon");
       const used = (rate.get(key) ?? 0) + 1;
       rate.set(key, used);
@@ -347,7 +417,7 @@ export async function createApp({
             Date.parse(code.expires_at) < Date.now()
           )
             throw new Error(
-              "설치 등록권 만료: 맥 미니에서 새 설치 파일 발급 필요",
+              "설치 등록권 만료: 관리 서버에서 새 설치 파일 발급 필요",
             );
           store.run(
             "UPDATE enrollments SET remaining=remaining-1 WHERE hash=?",

@@ -94,10 +94,10 @@ function batch(d, extra = {}) {
     ...extra,
   };
 }
-test("public listener does not expose admin state/bootstrap; admin host/origin defenses", async (t) => {
+test("untrusted host cannot access dashboard state or local bootstrap", async (t) => {
   const a = await setup(t);
-  assert.equal((await req(a.agentUrl, "/api/state")).status, 401);
-  assert.equal((await req(a.agentUrl, "/api/bootstrap", {})).status, 401);
+  assert.equal((await req(a.agentUrl, "/api/state")).status, 403);
+  assert.equal((await req(a.agentUrl, "/api/bootstrap", {})).status, 403);
   assert.equal((await req(a.url, "/api/state")).status, 401);
   assert.equal((await req(a.url, "/api/bootstrap", {})).status, 200);
   const foreign = await fetch(a.url + "/api/bootstrap", {

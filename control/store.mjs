@@ -52,6 +52,9 @@ export class Store {
   CREATE TABLE IF NOT EXISTS enrollments(hash TEXT PRIMARY KEY,expires_at TEXT,remaining INTEGER);
   CREATE TABLE IF NOT EXISTS labels(id INTEGER PRIMARY KEY AUTOINCREMENT,hotel_id TEXT,line TEXT,room TEXT,code TEXT,created_at TEXT);
   CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT);`);
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS batch_device_session ON batches(device_id,session_id,captured_at DESC)",
+    );
     this.adminToken = this.secret("admin.token");
     this.downloadToken = this.secret("download.token");
     const priv = join(dir, "update-private.pem"),
@@ -215,14 +218,15 @@ export class Store {
         where,
       ...args,
     );
-    const batches = this.all(
-      "SELECT * FROM batches" + where + " ORDER BY captured_at DESC LIMIT 40",
-      ...args,
-    ).map((b) => ({ ...b, observation: JSON.parse(b.observation) }));
     const latest = devices.map((d) => {
-      const batch = batches.find(
-        (b) => b.device_id === d.id && b.session_id === d.session_id,
+      const row = this.get(
+        "SELECT * FROM batches WHERE device_id=? AND session_id=? ORDER BY captured_at DESC LIMIT 1",
+        d.id,
+        d.session_id,
       );
+      const batch = row
+        ? { ...row, observation: JSON.parse(row.observation) }
+        : null;
       const evidence = this.get(
         "SELECT id,captured_at FROM batches WHERE device_id=? AND session_id=? AND json_extract(observation,'$.image') IS NOT NULL ORDER BY captured_at DESC LIMIT 1",
         d.id,

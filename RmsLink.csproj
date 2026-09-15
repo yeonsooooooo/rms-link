@@ -10,16 +10,18 @@
     <Nullable>disable</Nullable>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>assets/dashboard.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>RmsLink</AssemblyName>
     <RootNamespace>RmsLink</RootNamespace>
-    <Version>0.2.1</Version>
+    <Version>0.3.0</Version>
     <AssemblyTitle>RmsLink - RMS 화면 연동 에이전트</AssemblyTitle>
     <Company>RoseGold Software</Company>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Remove="tests/**/*.cs;installer/**/*.cs" />
+    <Content Include="assets/*.ico" CopyToOutputDirectory="PreserveNewest" />
 
   </ItemGroup>
 

@@ -8,11 +8,17 @@ public class CaptureRegion
     public int X { get; set; } public int Y { get; set; } public int W { get; set; } public int H { get; set; }
     [JsonIgnore] public Rectangle Rect => new(X,Y,W,H);
 }
+public class SelectedApplication
+{
+    public string Name {get;set;}=""; public string Executable {get;set;}=""; public string LaunchPath {get;set;}=""; public string Title {get;set;}=""; public long Handle {get;set;} public int ProcessId {get;set;}
+}
 public class AppConfig
 {
     public string HotelId {get;set;}="";
     public string DeviceId {get;set;}=Guid.NewGuid().ToString();
     public string ServerUrl {get;set;}="https://ys-macmini.tail984bfd.ts.net:8443";
+    public SelectedApplication SelectedApp {get;set;}
+    public bool RegionsRelative {get;set;}
     public List<CaptureRegion> Regions {get;set;}=new();
     public int IntervalMs {get;set;}=1500;
     public int OcrScale {get;set;}=3;

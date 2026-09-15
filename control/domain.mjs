@@ -62,6 +62,16 @@ export const observationSchema = z
     capturedAt: date,
     source: z.enum(["none", "ocr", "uia"]),
     ocrLanguage: z.string().max(50),
+    selectedApp: z
+      .object({
+        name: z.string().max(160),
+        process: z.string().max(100),
+        title: z.string().max(160),
+        method: z.string().max(40),
+      })
+      .nullable()
+      .optional(),
+    captureMethod: z.string().max(40).optional(),
     os: z.string().max(100).optional(),
     desktopAvailable: z.boolean().optional(),
     remoteSession: z.boolean().optional(),
@@ -121,6 +131,22 @@ export const eventKey = (device, e) =>
 export function diagnose(observation) {
   const errors = observation?.errors ?? [];
   const messages = {
+    APP_NOT_SELECTED: [
+      "키텍 앱 선택 필요",
+      "Windows의 RmsLink 연결 설정에서 키텍 아이콘을 선택해 주세요.",
+    ],
+    WINDOW_OCCLUDED: [
+      "키텍 화면이 다른 창에 가려짐",
+      "키텍 창을 앞으로 가져온 뒤 다시 확인하세요.",
+    ],
+    WINDOW_CAPTURE_TIMEOUT: [
+      "키텍 화면 응답 지연",
+      "앱이 응답하는지 확인하고 필요한 경우 RmsLink를 다시 시작하세요.",
+    ],
+    WINDOW_CAPTURE_EMPTY: [
+      "키텍 화면 캡처가 비어 있음",
+      "키텍 창을 앞으로 가져오세요. GPU/원격 화면은 현장 확인이 필요합니다.",
+    ],
     DESKTOP_LOCKED: [
       "Windows 화면 잠김",
       "Windows에 로그인하고 RMS 창을 표시해 주세요.",
@@ -148,7 +174,7 @@ export function diagnose(observation) {
     ],
     PARSE_NO_MATCH: [
       "호텔 화면 형식 분석 필요",
-      "맥 미니가 객실·시각·이벤트 어휘를 분석합니다.",
+      "분석 서버가 객실·시각·이벤트 어휘를 분석합니다.",
     ],
     REGION_INVALID: [
       "캡처 영역이 화면 밖에 있음",

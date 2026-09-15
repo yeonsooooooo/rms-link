@@ -1,3 +1,5 @@
+[설치·설정·분석 매뉴얼](SETUP-ANALYSIS.md)
+
 # RmsLink 운영
 
 ## 주소·데이터
@@ -42,8 +44,10 @@ Windows는 RSA 서명된 안내의 만료·호텔 범위·패키지 크기·SHA-
 ## 보관·제한
 
 - Windows outbox는 암호화하며 서버의 정확한 batch ID 확인 뒤 삭제합니다. 서버가 거부한 자료는 `rejected/`에 보존하고 상태에 건수를 표시합니다. outbox가 15,000개에 도달하면 새 수집을 대기하여 임의 유실을 방지합니다.
-- 화면 증거는 최대 30초 간격으로 전송하며 24시간 후 제거합니다. 일반 진단은 14일, 이벤트는 90일 보관합니다. 분석 작업이 참조한 진단은 재현을 위해 보존합니다.
-- 관리 API는 외부 수신기에 없습니다. Mac loopback 관제는 동일 Host/Origin 확인 후 HttpOnly/SameSite 쿠키를 발급합니다. 원격 다중 사용자 관리 로그인은 별도 제공하지 않습니다.
+- 화면 증거는 최대 5초 간격으로 전송하며 24시간 후 제거합니다. 일반 진단은 14일, 이벤트는 90일 보관합니다. 분석 작업이 참조한 진단은 재현을 위해 보존합니다.
+- 내부 관제는 loopback Host/Origin 검증 후 자동 로그인합니다. 외부 HTTPS 관제는 `dashboard-access.key`의 별도 256비트 접속 코드와 Secure/HttpOnly/SameSite 쿠키를 사용하며 세션은 12시간 후 만료됩니다. 기기 키와 기존 내부 admin 토큰으로 외부 관제에 로그인할 수 없습니다. 역할별 다중 사용자 계정은 제공하지 않습니다.
+- 외부 로그인 실패는 15분에 12회로 제한합니다. 코드를 재발급하려면 서버를 중지하고 `dashboard-access.key`를 별도로 보관한 뒤 파일을 제거하고 서버를 재시작하세요. 기존 세션도 서버 재시작 시 만료됩니다. `node scripts/desktop-mac.mjs`를 다시 실행해 개인 접속 안내 파일을 갱신합니다.
+- 대시보드는 Windows 화면 수집 이미지를 5초 간격으로 받습니다. 저장량과 네트워크 사용을 고려하고, 불필요하면 Windows의 이미지 공유 체크를 해제하세요.
 - 자동 창 탐색이 지원하지 않는 제품명, 캡처 가림, UIA 공급자 비호환, 한국어 OCR 품질은 현장 검증이 필요합니다. 사라진 창이나 읽지 못한 상태를 정상으로 만들지 않습니다.
 
 공식 참고: [Windows 데스크톱 WinRT API](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/winrt-apis-desktop-apps), [Codex 비대화형 실행](https://learn.chatgpt.com/docs/non-interactive-mode), [Tailscale Funnel](https://tailscale.com/docs/reference/tailscale-cli/funnel).

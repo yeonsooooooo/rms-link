@@ -68,6 +68,11 @@ public sealed class TrayContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
+        var dashboard=new ToolStripMenuItem("RmsLink 대시보드 열기");
+        dashboard.Click+=(_,_)=>System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(cfg.ServerUrl+"/"){UseShellExecute=true});
+        var choose=new ToolStripMenuItem("키텍 앱 선택 · 변경");
+        choose.Click+=(_,_)=>{using var picker=new AppPickerForm();if(picker.ShowDialog()!=DialogResult.OK)return;cfg.SelectedApp=picker.Selection;cfg.Regions.Clear();cfg.RegionsRelative=true;cfg.Save();try{DesktopLinks.Ensure(cfg);}catch(Exception ex){Logger.Error(ex.Message);}Restart(true);};
+        menu.Items.Add(dashboard);menu.Items.Add(choose);
         menu.Items.Add(previewItem);
         menu.Items.Add(reselectItem);
         menu.Items.Add(_autoStartItem);
@@ -87,9 +92,11 @@ public sealed class TrayContext : ApplicationContext
         _ = menu.Handle; // Create UI dispatch handle before worker callbacks.
         _worker.Sink.ExitForUpdate = () => { if(!menu.IsDisposed) menu.BeginInvoke(new Action(ExitApp)); };
         _worker.Start();
-        _icon.ShowBalloonTip(3000,"RmsLink 시작",$"호텔 [{cfg.HotelId}] · 맥 미니 연결 중",ToolTipIcon.Info);
+        try{DesktopLinks.Ensure(cfg);}catch(Exception ex){Logger.Error("바로가기: "+ex.Message);}
+        if(cfg.SelectedApp==null)menu.BeginInvoke(new Action(()=>choose.PerformClick()));
+        _icon.ShowBalloonTip(3000,"RmsLink 시작",$"호텔 [{cfg.HotelId}] · 관리 서버 연결 중",ToolTipIcon.Info);
         var updateItem=new ToolStripMenuItem("지금 업데이트 확인 · 적용");
-        updateItem.Click+=(_,_)=>{_worker.Sink.ManualUpdateRequested=true;_icon.ShowBalloonTip(3000,"업데이트","맥 미니에서 최신 앱과 호텔 프로필을 확인합니다.",ToolTipIcon.Info);};
+        updateItem.Click+=(_,_)=>{_worker.Sink.ManualUpdateRequested=true;_icon.ShowBalloonTip(3000,"업데이트","관리 서버에서 최신 앱과 호텔 프로필을 확인합니다.",ToolTipIcon.Info);};
         menu.Items.Insert(2,updateItem);
         var settingsItem=new ToolStripMenuItem("호텔 ID 변경");
         settingsItem.Click+=(_,_)=>Restart(false);
@@ -126,23 +133,14 @@ public sealed class TrayContext : ApplicationContext
 
     private void ReselectRegions()
     {
-        var regions = new List<CaptureRegion>();
-        while (true)
-        {
-            using var sel = new RoiSelectorForm();
-            if (sel.ShowDialog() != DialogResult.OK) break;
-            var r = sel.SelectedScreenRect;
-            regions.Add(new CaptureRegion { X = r.X, Y = r.Y, W = r.Width, H = r.Height });
-            if (MessageBox.Show("로그 영역을 하나 더 추가할까요?", "RmsLink",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
-                break;
-        }
-        if (regions.Count == 0) return;
-
-        _cfg.Regions = regions;
-        _cfg.Save();
-        MessageBox.Show("영역이 저장되었습니다. 프로그램을 다시 시작합니다.", "RmsLink");
-        Restart(true);
+        var found=WindowProbe.Find(_cfg.SelectedApp);
+        if(found.Count!=1||found[0].Minimized){MessageBox.Show("먼저 키텍 앱을 선택하고 창을 복원하세요.");return;}
+        var w=found[0];WindowProbe.Activate(w);
+        using var selector=new RoiSelectorForm();if(selector.ShowDialog()!=DialogResult.OK)return;
+        var area=selector.SelectedScreenRect;
+        if(!new Rectangle(w.X,w.Y,w.W,w.H).Contains(area)){MessageBox.Show("선택한 키텍 창 안의 로그 영역만 지정하세요.");return;}
+        _cfg.Regions=new(){new(){X=area.X-w.X,Y=area.Y-w.Y,W=area.Width,H=area.Height}};
+        _cfg.RegionsRelative=true;_cfg.Save();Restart(true);
     }
 
     private void Restart(bool resume)
