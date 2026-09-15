@@ -223,6 +223,11 @@ export class Store {
       const batch = batches.find(
         (b) => b.device_id === d.id && b.session_id === d.session_id,
       );
+      const evidence = this.get(
+        "SELECT id,captured_at FROM batches WHERE device_id=? AND session_id=? AND json_extract(observation,'$.image') IS NOT NULL ORDER BY captured_at DESC LIMIT 1",
+        d.id,
+        d.session_id,
+      );
       const online = !d.revoked && Date.now() - Date.parse(d.last_seen) < 45000;
       const captureFresh =
         batch && Date.now() - Date.parse(batch.captured_at) < 60000;
@@ -239,6 +244,7 @@ export class Store {
               ? "attention"
               : "collecting",
         diagnosis,
+        evidence: evidence ?? null,
         batch: batch
           ? {
               ...batch,

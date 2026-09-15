@@ -72,7 +72,9 @@ public sealed class OcrService
         while (scale > 1 && (long)Math.Max(bmp.Width, bmp.Height) * scale > maxDim)
             scale--;
 
-        using var scaled = CaptureService.Upscale(bmp, scale);
+        using var upscaled = CaptureService.Upscale(bmp, scale);
+        double ratio=Math.Min(1d,(double)maxDim/Math.Max(upscaled.Width,upscaled.Height));
+        using var scaled = ratio<1 ? new Bitmap(upscaled,new Size(Math.Max(1,(int)(upscaled.Width*ratio)),Math.Max(1,(int)(upscaled.Height*ratio)))) : (Bitmap)upscaled.Clone();
 
         // GDI Bitmap -> PNG 바이트 -> WinRT SoftwareBitmap
         byte[] pngBytes;

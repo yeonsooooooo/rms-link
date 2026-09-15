@@ -8,9 +8,9 @@ public static class CaptureService
     public static Bitmap Capture(Rectangle r)
     {
         var bmp = new Bitmap(r.Width, r.Height, PixelFormat.Format32bppArgb);
-        using var g = Graphics.FromImage(bmp);
+        try { using var g = Graphics.FromImage(bmp);
         g.CopyFromScreen(r.X, r.Y, 0, 0, r.Size, CopyPixelOperation.SourceCopy);
-        return bmp;
+        return bmp; } catch { bmp.Dispose(); throw; }
     }
 
     /// <summary>변화 감지용 고속 해시 (FNV-1a, 4픽셀 간격 샘플링)</summary>
