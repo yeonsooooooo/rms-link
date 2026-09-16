@@ -50,8 +50,7 @@ try {
   run("/usr/bin/touch", [app]);
   const key = readFileSync(join(data, "dashboard-access.key"), "utf8").trim();
   const url =
-    process.env.RMSLINK_PUBLIC_ORIGIN ??
-    "https://ys-macmini.tail984bfd.ts.net:8443";
+    process.env.RMSLINK_DASHBOARD_ORIGIN ?? "https://rms-link.vercel.app";
   writeFileSync(
     join(desktop, "RmsLink 접속 안내.txt"),
     `RmsLink 대시보드\n\n이 컴퓨터: 바탕화면의 RmsLink 대시보드 아이콘을 두 번 클릭하세요.\n외부 접속: ${url}/\n관리자 접속 코드: ${key}\n\n설정·분석 매뉴얼: ${url}/manual.html\n\n외부 접속 코드는 관리 담당자에게만 전달하세요. Windows 설치 파일에는 포함되지 않습니다.\n내부와 외부는 같은 호텔 데이터를 표시합니다. 서버 컴퓨터가 켜져 있고 로그인·인터넷 연결 상태여야 합니다.\n`,

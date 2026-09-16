@@ -1,13 +1,13 @@
 import test from "node:test";
 import { request } from "node:http";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../control/app.mjs";
 import { DashboardAuth } from "../control/auth.mjs";
 const publicOrigin = "https://rms.example.test";
-async function setup(t) {
+async function setup(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "rms-access-"));
   const app = await createApp({
     directory,
@@ -15,6 +15,7 @@ async function setup(t) {
     adminPort: 0,
     agentPort: 0,
     autoAnalyze: false,
+    ...options,
   });
   t.after(async () => {
     await app.close();
@@ -143,6 +144,80 @@ test("expired sessions and repeated wrong passwords are rejected", () => {
   assert(!auth.valid(r.token));
   for (let i = 0; i < 12; i++) assert.equal(auth.login("bad").status, 401);
   assert.equal(auth.login("valid").status, 429);
+});
+test("Vercel origin uses remote authentication, current shared state and dashboard shortcuts", async (t) => {
+  const dashboardOrigin = "https://rms-link.vercel.app";
+  const upstreamOrigin = "https://rms.example.test:8443";
+  const a = await setup(t, { dashboardOrigin, publicOrigin: upstreamOrigin });
+  const headers = { Origin: dashboardOrigin };
+  const call = (path, body, cookie, extra = {}) =>
+    remote(a, path, body, cookie, { ...headers, ...extra });
+  const bootstrap = await call("/api/bootstrap", {});
+  assert.equal(bootstrap.status, 200);
+  assert.deepEqual(await bootstrap.json(), {
+    ok: false,
+    loginRequired: true,
+    remote: true,
+  });
+  assert.equal(bootstrap.headers.get("set-cookie"), null);
+  assert.equal(
+    (
+      await call(
+        "/api/state",
+        undefined,
+        `rmslink_session=${a.store.adminToken}`,
+      )
+    ).status,
+    401,
+  );
+  const login = await call("/api/login", {
+    password: a.store.secret("dashboard-access.key"),
+  });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get("set-cookie");
+  assert.match(cookie, /Secure/);
+  assert(!/Domain=/i.test(cookie));
+  const session = cookie.split(";")[0];
+  const response = await call("/api/state", undefined, session);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("vercel-cdn-cache-control"), "no-store");
+  const snapshot = await response.json();
+  assert.equal(snapshot.access.publicOrigin, dashboardOrigin);
+  assert.deepEqual(snapshot.rooms, a.store.snapshot().rooms);
+  assert.equal((await call("/api/access", undefined, session)).status, 403);
+  assert.equal(
+    (
+      await call("/api/state", undefined, session, {
+        Origin: "https://evil.vercel.app",
+        "X-Forwarded-Host": "rms-link.vercel.app",
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await call("/api/state", undefined, session, { Host: "evil.test" }))
+      .status,
+    403,
+  );
+  const localBootstrap = await fetch(a.url + "/api/bootstrap", {
+    method: "POST",
+    headers: { Origin: dashboardOrigin, "X-Rmslink-Client": "1" },
+  });
+  assert.equal(localBootstrap.status, 403);
+  const shortcut = await (
+    await call("/api/shortcut", undefined, session)
+  ).text();
+  assert.equal(shortcut, `[InternetShortcut]\r\nURL=${dashboardOrigin}/\r\n`);
+  writeFileSync(join(a.store.dir, "installer.exe"), "test installer");
+  const download = await (
+    await call("/api/installer-link", undefined, session)
+  ).json();
+  assert(download.url.startsWith(`${upstreamOrigin}/download/`));
+  const installer = await call("/api/installer", undefined, session);
+  assert.equal(installer.status, 302);
+  assert.equal(installer.headers.get("location"), download.url);
+  await call("/api/logout", {}, session);
+  assert.equal((await call("/api/state", undefined, session)).status, 401);
 });
 test("live capture schema accepts explicit app and null while preserving error diagnostics", async (t) => {
   const { observationSchema } = await import("../control/domain.mjs");

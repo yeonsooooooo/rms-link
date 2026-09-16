@@ -29,6 +29,11 @@ const fields = {
     ":/usr/bin:/bin:/usr/sbin:/sbin",
   RMSLINK_AUTO_ANALYZE: "true",
   RMSLINK_AUTO_RELEASE: "true",
+  RMSLINK_PUBLIC_ORIGIN:
+    process.env.RMSLINK_PUBLIC_ORIGIN ??
+    "https://ys-macmini.tail984bfd.ts.net:8443",
+  RMSLINK_DASHBOARD_ORIGIN:
+    process.env.RMSLINK_DASHBOARD_ORIGIN ?? "https://rms-link.vercel.app",
 };
 const label = "kr.co.rosegold.rmslink-control";
 const plist = join(home, "Library/LaunchAgents", label + ".plist");
@@ -52,4 +57,4 @@ const result = spawnSync(
   { stdio: "inherit" },
 );
 if (result.status) process.exit(result.status);
-console.log("Mac mini RmsLink service installed: http://127.0.0.1:18760");
+console.log("RmsLink service installed: http://127.0.0.1:18760");

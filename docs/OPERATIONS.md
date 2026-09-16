@@ -4,7 +4,8 @@
 
 ## 주소·데이터
 
-- Mac mini 관제: http://127.0.0.1:18760
+- 내부 관제: http://127.0.0.1:18760
+- 외부 관제: https://rms-link.vercel.app (Vercel 프로젝트 `rms-link`)
 - Windows 전용 HTTPS: https://ys-macmini.tail984bfd.ts.net:8443
 - 외부 수신기는 `127.0.0.1:18761`에만 바인딩하며 Tailscale Funnel 8443을 사용합니다. 기존 443 게이트웨이를 변경하지 않습니다.
 - 데이터: `~/Library/Application Support/RmsLink` (0700)
@@ -14,6 +15,27 @@
 - 일반 사용자 실행은 반드시 hotel_id를 입력합니다. 이전 호텔 outbox는 당시 hotel_id/session_id를 유지합니다.
 
 ## 서버 설치 및 복구
+
+### Vercel 외부 주소
+
+`deploy/vercel`만 배포합니다. Vercel의 외부 rewrite가 기존 HTTPS 서버로 요청을 전달하므로 SQLite 데이터, 수집, 분석 작업은 계속 운영 서버에서 실행됩니다. 서버·중계·인터넷 연결이 필요합니다. 운영 데이터, 접속 코드, 개인키, Windows 설치 파일은 Vercel에 업로드하지 않습니다. 구성 방식은 [Vercel 외부 rewrite 문서](https://vercel.com/docs/routing/rewrites)를 따릅니다.
+
+```sh
+cd /Users/ys/dev/rms-link/deploy/vercel
+vercel link --yes --project rms-link
+vercel deploy --prod --yes
+```
+
+- `RMSLINK_DASHBOARD_ORIGIN=https://rms-link.vercel.app`: 공유 주소와 관제용 Windows 바로가기. `scripts/install-mac.mjs`가 LaunchAgent에 저장합니다.
+- `RMSLINK_PUBLIC_ORIGIN`: 기존 기기 수신·대용량 다운로드 주소. 설치된 기기 주소를 유지합니다.
+- API는 지정된 두 HTTPS 출처만 허용하며 원격 자동 로그인을 허용하지 않습니다. 로그인 쿠키는 각 접속 도메인에만 저장됩니다. 임의 preview 도메인의 로그인은 허용하지 않으며 정식 주소로 접속합니다.
+- 응답과 Vercel rewrite의 캐시를 끕니다. 실시간 이벤트 연결이 중계에서 끊어지면 브라우저가 재연결하며 5초 조회도 병행합니다.
+- `/api/installer`는 로그인 확인 후 다운로드 서버로 이동합니다. 약 290MiB 설치 파일의 전송은 Vercel을 거치지 않습니다.
+- 도메인을 바꿀 때는 서버의 `RMSLINK_DASHBOARD_ORIGIN`과 배포 별칭을 함께 변경하고 서버를 다시 시작한 뒤 `node scripts/desktop-mac.mjs`로 접속 안내를 갱신합니다. 기존 접속 코드는 유지되고 로그인 세션만 만료됩니다.
+- 장애 확인: 정식 주소의 `/health`, 로그인 전 `/api/state`의 401, 로그인 후 내부/외부 데이터 일치, `/api/events`의 `ready`/`change`, 매뉴얼과 `.url` 다운로드를 점검합니다.
+- 운영 서버의 프로젝트 폴더에서 `node scripts/verify-vercel.mjs`를 실행하면 로그인·캐시 방지·동일 데이터·실시간 연결·다운로드·로그아웃을 검사하고 `artifacts/vercel-verification.json`에 결과를 저장합니다. 접속 코드는 출력하지 않습니다.
+
+### 운영 서버
 
 `node scripts/install-mac.mjs`는 로그인 시 시작되는 LaunchAgent를 설치합니다. Mac 재부팅 후 사용자 로그인이 필요합니다. 서버 종료·재시작 시 SQLite/WAL을 복구하며 분석 중이던 작업은 interrupted로 표시합니다.
 

@@ -15,6 +15,7 @@ export async function createApp({
   agentPort = 18761,
   publicOrigin = process.env.RMSLINK_PUBLIC_ORIGIN ??
     "https://ys-macmini.tail984bfd.ts.net:8443",
+  dashboardOrigin = process.env.RMSLINK_DASHBOARD_ORIGIN ?? publicOrigin,
   autoAnalyze = true,
   autoRelease = false,
   corePath = process.env.RMSLINK_CORE,
@@ -24,11 +25,20 @@ export async function createApp({
     subscribers = new Set(),
     rate = new Map();
   const auth = new DashboardAuth(store);
-  if (
-    new URL(publicOrigin).protocol !== "https:" ||
-    new URL(publicOrigin).origin !== publicOrigin
-  )
-    throw Error("외부 HTTPS origin 설정 오류");
+  const remoteOrigins = new Set([publicOrigin, dashboardOrigin]);
+  for (const origin of remoteOrigins)
+    if (
+      new URL(origin).protocol !== "https:" ||
+      new URL(origin).origin !== origin
+    )
+      throw Error("외부 HTTPS origin 설정 오류");
+  const remoteHosts = new Set(
+    [...remoteOrigins].map((origin) => new URL(origin).host),
+  );
+  // Vercel external rewrites connect to :8443 but omit the port in Host.
+  // Permit only this configured upstream hostname, never a forwarded value.
+  if (dashboardOrigin !== publicOrigin)
+    remoteHosts.add(new URL(publicOrigin).hostname);
   let ownOrigin;
   const broadcast = () => {
     for (const res of subscribers)
@@ -75,6 +85,8 @@ export async function createApp({
   heartbeat.unref();
   const handler = (admin) => async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
+    res.setHeader("CDN-Cache-Control", "no-store");
+    res.setHeader("Vercel-CDN-Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader(
@@ -108,11 +120,18 @@ export async function createApp({
             url.pathname,
           ));
       if (admin || remote) {
-        const expectedOrigin = remote ? publicOrigin : ownOrigin;
-        if (
-          req.headers.host !== new URL(expectedOrigin).host ||
-          (req.headers.origin && req.headers.origin !== expectedOrigin)
-        ) {
+        // External rewrites send the upstream Host and preserve the browser's
+        // Origin. Only the configured HTTPS origins are trusted; forwarded
+        // headers never grant access or allow the local bootstrap remotely.
+        const allowedHost = remote
+          ? remoteHosts.has(req.headers.host)
+          : req.headers.host === new URL(ownOrigin).host;
+        const allowedOrigin =
+          !req.headers.origin ||
+          (remote
+            ? remoteOrigins.has(req.headers.origin)
+            : req.headers.origin === ownOrigin);
+        if (!allowedHost || !allowedOrigin) {
           json({ error: "허용하지 않는 출처" }, 403);
           return;
         }
@@ -178,6 +197,8 @@ export async function createApp({
           if (url.pathname === "/api/events" && req.method === "GET") {
             res.writeHead(200, {
               "Content-Type": "text/event-stream",
+              "Cache-Control": "no-store, no-transform",
+              "X-Accel-Buffering": "no",
               Connection: "keep-alive",
             });
             res.write("event: ready\ndata: {}\n\n");
@@ -191,7 +212,7 @@ export async function createApp({
             json({
               ...store.snapshot(hotel ? id.parse(hotel) : undefined),
               worker: worker.status(),
-              access: { publicOrigin, remote },
+              access: { publicOrigin: dashboardOrigin, remote },
               installer: existsSync(join(directory, "installer.exe"))
                 ? { available: true }
                 : null,
@@ -204,7 +225,7 @@ export async function createApp({
                 { error: "서버 컴퓨터에서 접속 코드를 확인해 주세요." },
                 403,
               );
-            return json({ publicOrigin, code: auth.key });
+            return json({ publicOrigin: dashboardOrigin, code: auth.key });
           }
           if (url.pathname === "/api/shortcut" && req.method === "GET") {
             res.writeHead(200, {
@@ -212,12 +233,21 @@ export async function createApp({
               "Content-Disposition":
                 "attachment; filename=RmsLink-Dashboard.url",
             });
-            return res.end(`[InternetShortcut]\r\nURL=${publicOrigin}/\r\n`);
+            return res.end(`[InternetShortcut]\r\nURL=${dashboardOrigin}/\r\n`);
           }
           if (url.pathname === "/api/installer" && req.method === "GET") {
             const f = join(directory, "installer.exe");
             if (!existsSync(f)) {
               json({ error: "설치 파일 빌드 중" }, 404);
+              return;
+            }
+            // Large installers go directly to the download service, avoiding
+            // proxy timeouts. The capability is disclosed only after login.
+            if (remote && dashboardOrigin !== publicOrigin) {
+              res.writeHead(302, {
+                Location: `${publicOrigin}/download/${store.downloadToken}/RmsLink-Setup.exe`,
+              });
+              res.end();
               return;
             }
             res.writeHead(200, {

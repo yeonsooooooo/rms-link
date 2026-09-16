@@ -1,0 +1,29 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": null,
+  "installCommand": null,
+  "outputDirectory": "public",
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "https://ys-macmini.tail984bfd.ts.net:8443/"
+    },
+    {
+      "source": "/:path*",
+      "destination": "https://ys-macmini.tail984bfd.ts.net:8443/:path*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/:path*",
+      "headers": [
+        { "key": "x-vercel-enable-rewrite-caching", "value": "0" },
+        { "key": "Cache-Control", "value": "no-store" },
+        { "key": "CDN-Cache-Control", "value": "no-store" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "no-store" },
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    }
+  ]
+}
