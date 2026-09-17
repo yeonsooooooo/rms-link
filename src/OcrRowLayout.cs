@@ -18,3 +18,14 @@ public static class OcrRowLayout
         return rows.Select(row=>string.Join(" ",row.OrderBy(w=>w.X).Select(w=>w.Text))).ToList();
     }
 }
+
+public static class AccessibleRowLayout
+{
+    public static string Join(string name,IEnumerable<string> cells)
+    {
+        var values=cells.Where(s=>!string.IsNullOrWhiteSpace(s)).Distinct().ToArray();
+        // Some providers repeat the complete row in Name as well as exposing its cells.
+        if(!string.IsNullOrWhiteSpace(name) && values.All(v=>name.Contains(v,StringComparison.Ordinal)))return name;
+        return string.Join(" ",new[]{name}.Concat(values).Where(s=>!string.IsNullOrWhiteSpace(s)).Distinct());
+    }
+}

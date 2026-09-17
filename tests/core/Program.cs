@@ -1,5 +1,13 @@
 using System.Text.Json;
 using RmsLink;
+using RmsLink.Shared;
+using System.Diagnostics;
+using System.Security.Cryptography;
+if(args.Length==3 && args[0]=="--update-fixture") {
+    if(args[2]=="crash")return 3;
+    if(args[2]=="healthy")File.WriteAllText(args[1],"ready");
+    Thread.Sleep(30000);return 0;
+}
 if(args.Length==1&&args[0]=="--evaluate") {
     try {
         using var input=JsonDocument.Parse(Console.In.ReadToEnd());var r=input.RootElement;
@@ -61,5 +69,44 @@ var hint=new ReadingSession().Read(new[]{"101 문닫힘"},Array.Empty<string>(),
 Check(hint.Events.Count==0 && hint.SuggestedMode=="snapshot","No timestamp only suggests snapshot, never silently changes mode");
 var rows=OcrRowLayout.Join(new[]{new ScreenWord("문열림",160,20,50,15),new ScreenWord("101",5,21,30,14),new ScreenWord("12:01:00",300,20,80,15),new ScreenWord("102",5,50,30,15),new ScreenWord("키삽입",160,50,50,15),new ScreenWord("12:01:02",300,50,80,15)});
 Check(rows.SequenceEqual(new[]{"101 문열림 12:01:00","102 키삽입 12:01:02"}),"OCR columns reassemble by physical row without joining adjacent rooms");
+Check(AccessibleRowLayout.Join("101 문열림 12:01:00",new[]{"101","문열림","12:01:00"})=="101 문열림 12:01:00","UIA row name and cells must not duplicate a room number");
+Check(AccessibleRowLayout.Join("101",new[]{"문열림","12:01:00"})=="101 문열림 12:01:00","UIA separate cell values must join into a row");
+Check(first.Events.Single().Source=="hybrid","Agreement must retain both reading methods");
+Check(second.Events.Single(e=>e.Room=="102").Source=="ocr","OCR supplement must retain OCR provenance");
+Check(initial.Events.All(e=>e.Source=="uia"),"Direct readings must retain UIA provenance");
+using(var rsa=RSA.Create(2048)) {
+    var payload=System.Text.Encoding.UTF8.GetBytes(JsonDefaults.Serialize(new UpdateOffer{ExpiresAt=DateTimeOffset.UtcNow.AddHours(1)}));
+    var envelope=new SignedEnvelope{Payload=Convert.ToBase64String(payload),Signature=Convert.ToBase64String(rsa.SignData(payload,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1))};
+    Check(Updater.Verify(envelope,rsa.ExportSubjectPublicKeyInfoPem())!=null,"Signed update must verify in actual Windows verifier");
+    payload[0]^=1;envelope.Payload=Convert.ToBase64String(payload);
+    bool rejected=false;try{Updater.Verify(envelope,rsa.ExportSubjectPublicKeyInfoPem());}catch{rejected=true;}
+    Check(rejected,"Tampered update must be rejected by C# verifier");
+}
+foreach(var mode in new[]{"healthy","crash","timeout","throw"}) {
+    var folder=Path.Combine(Path.GetTempPath(),"rmslink-update-test-"+Guid.NewGuid());Directory.CreateDirectory(folder);
+    var processes=new List<int>();
+    try {
+        // Simulate restart after a power loss with current already changed and a stale marker.
+        UpdateActivation.WriteCurrent(folder,"0.4.1");
+        File.WriteAllText(Path.Combine(folder,"pending.json"),"{\"version\":\"0.4.1\",\"previous\":\"0.4.0\"}");
+        File.WriteAllText(Path.Combine(folder,"healthy-0.4.1"),"stale");
+        Process LaunchFixture(string version) {
+            if(version=="0.4.1"&&mode=="throw")throw new Exception("Cannot execute new binary");
+            var psi=new ProcessStartInfo(Environment.ProcessPath){UseShellExecute=false};
+            if(Path.GetFileNameWithoutExtension(Environment.ProcessPath)=="dotnet")psi.ArgumentList.Add(typeof(Updater).Assembly.Location);
+            psi.ArgumentList.Add("--update-fixture");psi.ArgumentList.Add(Path.Combine(folder,"healthy-"+version));psi.ArgumentList.Add(version=="0.4.0"?"healthy":mode);
+            var child=Process.Start(psi);processes.Add(child.Id);return child;
+        }
+        bool applied=UpdateActivation.Apply(folder,LaunchFixture,TimeSpan.FromSeconds(2));
+        Check(applied==(mode=="healthy"),"Update activation result: "+mode);
+        Check(UpdateActivation.ReadCurrent(folder)==(applied?"0.4.1":"0.4.0"),"Update pointer/rollback: "+mode);
+        if(!applied){var wait=Stopwatch.StartNew();while(!File.Exists(Path.Combine(folder,"healthy-0.4.0"))&&wait.Elapsed<TimeSpan.FromSeconds(5))Thread.Sleep(50);Check(File.Exists(Path.Combine(folder,"healthy-0.4.0")),"Previous process actually started: "+mode);}
+        Check(!File.Exists(Path.Combine(folder,"pending.json")),"Pending update cleared: "+mode);
+        Check(File.Exists(Path.Combine(folder,"failed-update.json"))!=applied,"Failed version quarantine: "+mode);
+    } finally {
+        foreach(var processId in processes)try{using var process=Process.GetProcessById(processId);if(!process.HasExited){process.Kill(true);process.WaitForExit(5000);}}catch{}
+        Directory.Delete(folder,true);
+    }
+}
 Console.WriteLine(JsonDefaults.Serialize(new {passed=true,tests=count}));return 0;
-namespace RmsLink {public static class AppConfig{public static string Dir=>Path.GetTempPath();}public static class Logger{public static void Error(string s)=>Console.Error.WriteLine(s);}}
+namespace RmsLink {public class AppConfig{public static string Dir=>Path.GetTempPath();public static string InstallDir=>Path.GetTempPath();}public static class Logger{public static void Error(string s)=>Console.Error.WriteLine(s);}}

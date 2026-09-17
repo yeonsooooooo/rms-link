@@ -211,7 +211,7 @@ export async function createApp({
             const hotel = url.searchParams.get("hotelId");
             json({
               ...store.snapshot(hotel ? id.parse(hotel) : undefined),
-              capabilities: ["screen-reading-v2"],
+              capabilities: ["screen-reading-v2", "reading-methods-v1"],
               worker: worker.status(),
               access: { publicOrigin: dashboardOrigin, remote },
               installer: existsSync(join(directory, "installer.exe"))
@@ -311,6 +311,22 @@ export async function createApp({
               code: b.code,
             });
             json({ ok: true });
+            broadcast();
+            return;
+          }
+          if (url.pathname === "/api/reading-checks" && req.method === "POST") {
+            const b = z
+              .object({
+                deviceId: z.uuid(),
+                batchId: z.uuid(),
+                index: z.number().int().min(0).max(1199),
+                expectedRoom: z.string().regex(/^[\p{L}\d_-]{1,30}$/u),
+                expectedCode: z.enum(codes),
+                confirmed: z.literal(true),
+              })
+              .strict()
+              .parse(await body());
+            json(store.checkReading(b));
             broadcast();
             return;
           }

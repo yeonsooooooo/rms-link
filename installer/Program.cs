@@ -45,24 +45,14 @@ static class Program
             }
             bool update=args.Length==2 && args[0]=="--update";
             if(update){try{using var old=Process.GetProcessById(int.Parse(args[1]));if(!old.WaitForExit(45000))throw new Exception("RmsLink 종료를 기다리고 있습니다. 다시 업데이트해 주세요.");}catch(ArgumentException){}}
-            string pending=Path.Combine(Root,"pending.json"),previous=ReadCurrent();
-            if(update && File.Exists(pending)) {
-                using var doc=JsonDocument.Parse(File.ReadAllText(pending));string next=doc.RootElement.GetProperty("version").GetString();ValidateVersion(next);WriteCurrent(next);
-                string marker=Path.Combine(Root,"healthy-"+next);File.Delete(marker);
-                using var child=Launch(next,true);
-                var due=DateTime.UtcNow.AddSeconds(90);
-                while(DateTime.UtcNow<due && !child.HasExited && !File.Exists(marker))System.Threading.Thread.Sleep(500);
-                if(!File.Exists(marker)||child.HasExited) {
-                    if(!child.HasExited)child.Kill(true);WriteCurrent(previous);
-                    File.WriteAllText(Path.Combine(Root,"failed-update.json"),JsonSerializer.Serialize(new {version=next,at=DateTimeOffset.UtcNow,error="새 버전 준비 확인 실패 · 이전 버전 복구"}));Launch(previous,true);
-                } else File.Delete(Path.Combine(Root,"failed-update.json"));
-                File.Delete(pending);
-            } else Launch(ReadCurrent(),false,args.Contains("--setup"));
+            string pending=Path.Combine(Root,"pending.json");
+            if(File.Exists(pending)) UpdateActivation.Apply(Root,v=>Launch(v,true),TimeSpan.FromSeconds(90));
+            else Launch(ReadCurrent(),false,args.Contains("--setup"));
             return 0;
         }catch(Exception ex){File.AppendAllText(Path.Combine(Root,"installer.log"),DateTimeOffset.Now+" "+ex+Environment.NewLine);MessageBox.Show("RmsLink 설치/업데이트 실패\n"+ex.Message,"RmsLink");return 1;}
     }
-    static void ValidateVersion(string v){if(!System.Text.RegularExpressions.Regex.IsMatch(v??"",@"^\d+\.\d+\.\d+$"))throw new Exception("버전 정보 오류");}
-    static string ReadCurrent(){string v=File.ReadAllText(Path.Combine(Root,"current.txt")).Trim();ValidateVersion(v);return v;}
-    static void WriteCurrent(string v){ValidateVersion(v);File.WriteAllText(Path.Combine(Root,"current.txt.tmp"),v);File.Move(Path.Combine(Root,"current.txt.tmp"),Path.Combine(Root,"current.txt"),true);}
+    static void ValidateVersion(string v)=>UpdateActivation.ValidateVersion(v);
+    static string ReadCurrent()=>UpdateActivation.ReadCurrent(Root);
+    static void WriteCurrent(string v)=>UpdateActivation.WriteCurrent(Root,v);
     static Process Launch(string v,bool resume,bool setup=false){ValidateVersion(v);var p=new ProcessStartInfo(Path.Combine(Root,"versions",v,"RmsLink.exe")){UseShellExecute=false,WorkingDirectory=Root};if(resume)p.ArgumentList.Add("--resume");if(setup)p.ArgumentList.Add("--setup");return Process.Start(p);}
 }

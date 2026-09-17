@@ -103,7 +103,25 @@ try {
         pending: 0,
         snapshotEvidenceAt: now,
       },
-      readings,
+      readings: readings.map((r) => ({ ...r, source: "hybrid" })),
+      channelReadings: [
+        { ...readings[0], source: "uia" },
+        { ...readings[0], source: "ocr", room: "102" },
+      ],
+      methods: {
+        uia: {
+          status: "ok",
+          lineCount: 2,
+          candidateCount: 2,
+          acceptedCount: 2,
+        },
+        ocr: {
+          status: "ok",
+          lineCount: 2,
+          candidateCount: 2,
+          acceptedCount: 2,
+        },
+      },
       ocrLanguage: "ko",
       os: "Windows 11 (test fixture)",
       errors: [],
@@ -149,6 +167,17 @@ try {
   await page.getByText("테스트 PC · 현장 시뮬레이션", { exact: true }).click();
   await page.getByRole("heading", { name: "판독 원문과 실패 사유" }).waitFor();
   await page.getByText("이번 화면에서 확인되지 않은 객실: 103").waitFor();
+  await page.getByRole("heading", { name: "어떻게 읽었나요?" }).waitFor();
+  await page
+    .getByRole("button", { name: "방법별 결과 맞음·틀림 기록" })
+    .click();
+  await page.locator("#reading-index").selectOption("1");
+  await page.locator("#reading-room").fill("101");
+  await page.locator("#reading-code").selectOption("DOOR_CLOSE");
+  await page.locator("#reading-confirm").check();
+  await page.locator("[data-save]").click();
+  await page.locator(".modal-backdrop").waitFor({ state: "detached" });
+  assert.equal(app.store.get("SELECT matched FROM reading_checks").matched, 0);
   await page.getByRole("button", { name: "실제 문·키 동작 확인" }).click();
   await page.locator("#field-confirm").check();
   await page.locator("[data-save]").click();
@@ -162,7 +191,7 @@ try {
   );
   await page.locator("[data-close]").click();
   await page.screenshot({
-    path: join(artifacts, "screen-verification-040.png"),
+    path: join(artifacts, "screen-verification-041.png"),
     fullPage: true,
   });
   await page.getByRole("button", { name: "호텔별 규칙 편집" }).click();

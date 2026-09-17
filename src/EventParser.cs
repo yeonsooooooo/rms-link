@@ -4,6 +4,7 @@ namespace RmsLink;
 public sealed record ParsedEvent(string Room, string Code, string EventRaw, string EventTime, DateOnly EventDate, string RawLine, bool Fuzzy)
 {
     public string Kind { get; init; } = "event";
+    public string Source { get; init; } = "unknown";
     public string DedupKey => $"{Room}|{Code}|{EventTime}|{EventDate:yyyyMMdd}|{Kind}";
     public DateTimeOffset ObservedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset OccurredAt { get; init; }

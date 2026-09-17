@@ -36,6 +36,7 @@ public sealed class WindowCapture:IDisposable
         pending=Task.Run(()=>Print(w));
         if(await Task.WhenAny(pending,Task.Delay(1200))!=pending)throw new Exception("WINDOW_CAPTURE_TIMEOUT: 키텍 창을 앞으로 가져와 주세요");
         Bitmap image;try{image=await pending;}finally{pending=null;}
+        if(!WindowProbe.SameGeometry(w)){image.Dispose();throw new Exception("WINDOW_OCCLUDED: 캡처 중 선택한 창이 바뀌었습니다");}
         if(!HasContent(image)){image.Dispose();throw new Exception("WINDOW_CAPTURE_EMPTY: 키텍 창을 앞으로 가져와 주세요");}
         return (image,"print-window");
     }

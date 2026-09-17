@@ -39,7 +39,7 @@ public sealed class AppPickerForm:Form
                 selected=w;confirm.Enabled=true;info.Text="선택한 앱: "+w.Process+" · "+w.Title+"\n미리보기가 실제 키텍 화면인지 확인한 후 아래 연결 버튼을 누르세요.";
             }catch(Exception ex){if(!IsDisposed&&current==generation)info.Text=ex.Message;}
         };
-        confirm.Click+=(_,_)=>{if(selected==null)return;Selection=new(){Vendor=vendor.Text,Name="키텍 앱",Executable=selected.Executable,LaunchPath=string.IsNullOrEmpty(launchPath)?selected.Executable:launchPath,Title=selected.Title,Handle=selected.Handle,ProcessId=selected.ProcessId};DialogResult=DialogResult.OK;Close();};
+        confirm.Click+=(_,_)=>{if(selected==null)return;Selection=new(){Vendor=vendor.Text,Name="키텍 앱",Executable=selected.Executable,LaunchPath=string.IsNullOrEmpty(launchPath)||!string.Equals(selected.Executable,executable,StringComparison.OrdinalIgnoreCase)?selected.Executable:launchPath,Title=selected.Title,Handle=selected.Handle,ProcessId=selected.ProcessId};DialogResult=DialogResult.OK;Close();};
     }
     void LoadDesktop()
     {
@@ -83,7 +83,7 @@ public static class DesktopLinks
         var icon=Path.Combine(AppContext.BaseDirectory,"assets","dashboard.ico");
         File.WriteAllText(Path.Combine(desktop,"RmsLink 대시보드.url"),"[InternetShortcut]\r\nURL="+cfg.ServerUrl+"/\r\nIconFile="+icon+"\r\nIconIndex=0\r\n",System.Text.Encoding.Unicode);
         var launcher=Path.Combine(AppConfig.InstallDir,"RmsLinkLauncher.exe");
-        ShortcutFile.Create(Path.Combine(desktop,"RmsLink 연결 설정.lnk"),Application.ExecutablePath,"호텔 ID 확인 · 키텍 앱 선택",Path.Combine(AppContext.BaseDirectory,"assets","dashboard.ico"),"--setup");
+        ShortcutFile.Create(Path.Combine(desktop,"RmsLink 연결 설정.lnk"),(File.Exists(launcher)?launcher:Application.ExecutablePath),"호텔 ID 확인 · 키텍 앱 선택",Path.Combine(AppContext.BaseDirectory,"assets","dashboard.ico"),"--setup");
         if(cfg.SelectedApp==null)return;
         string destination=Path.Combine(desktop,"키텍 앱.lnk"),source=cfg.SelectedApp.LaunchPath;
         if(Path.GetExtension(source).Equals(".lnk",StringComparison.OrdinalIgnoreCase)&&File.Exists(source)) {

@@ -76,7 +76,7 @@ public sealed class ReadingSession
                 result.UncertainFields.Add(new(chosen.Event.Room,Field(chosen.Event)));
                 continue;
             }
-            result.Events.Add(chosen.Event);
+            result.Events.Add(chosen.Event with { Source = accessible.Event!=null ? (group.Any(c=>c.Source=="ocr") ? "hybrid" : "uia") : "ocr" });
         }
         previousOcr=currentOcr; previousAt=now;
         if(result.Pending>0) result.Warnings.Add($"OCR_CONFIRMING: {result.Pending}개 상태를 다음 화면과 대조 중");
@@ -104,6 +104,8 @@ public sealed class ReadingSession
                     if(!result.SnapshotEvidenceAt.HasValue || evidenceAt<result.SnapshotEvidenceAt) result.SnapshotEvidenceAt=evidenceAt;
                 }
             }
+            var currentRooms=result.Events.Select(e=>e.Room).ToHashSet();
+            result.MissingRooms=profile.ExpectedRooms.Where(r=>!currentRooms.Contains(r)).ToList();
             if(result.MissingRooms.Count>0) result.Warnings.Add($"ROOMS_NOT_VISIBLE: {result.MissingRooms.Count}개 객실이 이번 화면에서 확인되지 않았습니다");
         }
         return result;

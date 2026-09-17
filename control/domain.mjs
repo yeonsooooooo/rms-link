@@ -57,10 +57,12 @@ export const eventSchema = z
     rawLine: z.string().max(1000),
     occurredAt: date,
     observedAt: date,
+    source: z.enum(["unknown", "uia", "ocr", "hybrid"]).optional(),
   })
   .strict();
 const line = z.object({
   text: z.string().max(1000),
+  source: z.enum(["uia", "ocr"]).optional(),
   code: z.string().nullable().optional(),
   room: z.string().nullable().optional(),
   reason: z.string().max(500).optional(),
@@ -70,6 +72,40 @@ export const observationSchema = z
     capturedAt: date,
     source: z.enum(["none", "ocr", "uia", "hybrid"]),
     readerVersion: z.string().max(40).optional(),
+    methods: z
+      .object({
+        uia: z.object({
+          status: z.enum([
+            "not_attempted",
+            "skipped_region",
+            "ok",
+            "empty",
+            "timeout",
+            "error",
+            "stale",
+          ]),
+          lineCount: z.number().int().min(0).max(300),
+          candidateCount: z.number().int().min(0).max(600),
+          acceptedCount: z.number().int().min(0).max(600),
+        }),
+        ocr: z.object({
+          status: z.enum([
+            "not_attempted",
+            "ok",
+            "empty",
+            "unavailable",
+            "error",
+          ]),
+          lineCount: z.number().int().min(0).max(10000),
+          candidateCount: z.number().int().min(0).max(600),
+          acceptedCount: z.number().int().min(0).max(600),
+        }),
+      })
+      .optional(),
+    channelReadings: z
+      .array(eventSchema.extend({ source: z.enum(["uia", "ocr"]) }))
+      .max(1200)
+      .optional(),
     application: z
       .object({
         identity: z.string().regex(/^[a-f0-9]{64}$/),
@@ -317,6 +353,7 @@ export function applyEvent(room, e, deviceId, sessionId) {
       deviceId,
       sessionId,
       code: e.code,
+      source: e.source ?? "unknown",
     },
   };
 }

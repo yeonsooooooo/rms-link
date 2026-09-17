@@ -1,3 +1,4 @@
+import { readingMethods } from "./reading-methods.mjs";
 import { DatabaseSync } from "node:sqlite";
 import {
   mkdirSync,
@@ -57,6 +58,14 @@ export class Store {
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS batch_device_session ON batches(device_id,session_id,captured_at DESC)",
     );
+    // Additive migrations preserve installations and old evidence.
+    if (!this.all("PRAGMA table_info(events)").some((c) => c.name === "source"))
+      this.db.exec(
+        "ALTER TABLE events ADD COLUMN source TEXT NOT NULL DEFAULT 'unknown'",
+      );
+    this.db
+      .exec(`CREATE TABLE IF NOT EXISTS reading_checks(sample_key TEXT PRIMARY KEY,device_id TEXT,scope TEXT,batch_id TEXT,source TEXT,raw_line TEXT,room TEXT,code TEXT,expected_room TEXT,expected_code TEXT,matched INTEGER,checked_at TEXT);
+      CREATE INDEX IF NOT EXISTS reading_check_scope ON reading_checks(device_id,scope);`);
     this.adminToken = this.secret("admin.token");
     this.downloadToken = this.secret("download.token");
     const priv = join(dir, "update-private.pem"),
@@ -179,7 +188,7 @@ export class Store {
         )
           throw new Error("이벤트 시각 범위 오류");
         const inserted = this.run(
-          "INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?,?)",
+          "INSERT OR IGNORE INTO events(id,device_id,hotel_id,room,code,kind,occurred_at,observed_at,raw_line,received_at,source) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           eventKey(b.deviceId, e),
           b.deviceId,
           b.hotelId,
@@ -190,6 +199,7 @@ export class Store {
           e.observedAt,
           e.rawLine,
           now,
+          e.source ?? "unknown",
         );
         if (!inserted.changes) continue;
         const row = this.get(
@@ -339,6 +349,99 @@ export class Store {
     });
     return this.verification(device, latest);
   }
+  readingAccuracy(deviceId, batch) {
+    const scope = this.checkScope(batch);
+    const counts = scope
+      ? this.all(
+          "SELECT source,COUNT(*) AS total,SUM(matched) AS matched FROM reading_checks WHERE device_id=? AND scope=? GROUP BY source",
+          deviceId,
+          scope,
+        )
+      : [];
+    return ["uia", "ocr"].map((source) => {
+      const c = counts.find((c) => c.source === source) ?? {
+        total: 0,
+        matched: 0,
+      };
+      return {
+        source,
+        total: c.total,
+        matched: c.matched,
+        mismatched: c.total - c.matched,
+        percent: c.total ? Math.round((c.matched / c.total) * 1000) / 10 : null,
+      };
+    });
+  }
+  checkReading({ deviceId, batchId, index, expectedRoom, expectedCode }) {
+    const device = this.get(
+      "SELECT * FROM devices WHERE id=? AND revoked=0",
+      deviceId,
+    );
+    const batch = this.get(
+      "SELECT * FROM batches WHERE id=? AND device_id=?",
+      batchId,
+      deviceId,
+    );
+    const scope = this.checkScope(batch);
+    const latest =
+      device &&
+      this.get(
+        "SELECT * FROM batches WHERE device_id=? AND session_id=? ORDER BY captured_at DESC LIMIT 1",
+        deviceId,
+        device.session_id,
+      );
+    if (
+      !device ||
+      !scope ||
+      batch.session_id !== device.session_id ||
+      batch.hotel_id !== device.hotel_id ||
+      scope !== this.checkScope(latest) ||
+      batch.profile_revision !== this.profile(device.hotel_id).revision ||
+      Date.now() - Date.parse(device.last_seen) > 45000 ||
+      Date.now() - Date.parse(batch.captured_at) > 120000
+    )
+      throw new Error("현재 앱과 규칙으로 읽은 최근 화면을 선택해 주세요.");
+    const reading = JSON.parse(batch.observation).channelReadings?.[index];
+    if (!reading || !["uia", "ocr"].includes(reading.source))
+      throw new Error("대조할 읽기 결과가 없습니다.");
+    // Re-captures of the same raw snapshot/event must not inflate the denominator.
+    const key = digest(
+      JSON.stringify([
+        deviceId,
+        scope,
+        reading.source,
+        reading.rawLine,
+        reading.room,
+        reading.code,
+        reading.kind,
+        reading.kind === "event" ? reading.occurredAt : "",
+      ]),
+    );
+    const matched =
+      reading.room === expectedRoom && reading.code === expectedCode ? 1 : 0;
+    this.run(
+      "INSERT INTO reading_checks VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sample_key) DO UPDATE SET expected_room=excluded.expected_room,expected_code=excluded.expected_code,matched=excluded.matched,checked_at=excluded.checked_at",
+      key,
+      deviceId,
+      scope,
+      batchId,
+      reading.source,
+      reading.rawLine,
+      reading.room,
+      reading.code,
+      expectedRoom,
+      expectedCode,
+      matched,
+      new Date().toISOString(),
+    );
+    this.audit("reading_checked", device.hotel_id, {
+      deviceId,
+      batchId,
+      source: reading.source,
+      matched: !!matched,
+    });
+    return this.readingAccuracy(deviceId, latest);
+  }
   snapshot(hotel) {
     const where = hotel ? " WHERE hotel_id=?" : "";
     const args = hotel ? [hotel] : [];
@@ -379,6 +482,8 @@ export class Store {
         diagnosis,
         evidence: evidence ?? null,
         verification: this.verification(d, batch),
+        readingMethods: readingMethods(batch?.observation),
+        readingAccuracy: this.readingAccuracy(d.id, batch),
         batch: batch
           ? {
               ...batch,

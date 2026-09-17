@@ -551,3 +551,99 @@ test(
     );
   },
 );
+
+test("method provenance survives ingestion and human sample accuracy counts wrong answers without duplicates", async (t) => {
+  const a = await setup(t),
+    d = await enrolled(a);
+  const b = fieldBatch(d, "DOOR_OPEN");
+  const reading = { ...b.observation.readings[0], source: "uia" };
+  b.observation.readings = [reading];
+  b.observation.channelReadings = [
+    reading,
+    { ...reading, source: "ocr", room: "102" },
+  ];
+  b.observation.methods = {
+    uia: { status: "ok", lineCount: 1, candidateCount: 1, acceptedCount: 1 },
+    ocr: { status: "ok", lineCount: 1, candidateCount: 1, acceptedCount: 0 },
+  };
+  b.observation.lines = [
+    { text: reading.rawLine, source: "uia", room: "101", code: "DOOR_OPEN" },
+  ];
+  b.events = [reading];
+  assert.equal(
+    (await req(a.agentUrl, "/agent/observations", b, d.token)).status,
+    200,
+  );
+  let state = a.store.snapshot();
+  assert.equal(state.events[0].source, "uia");
+  assert.equal(state.rooms[0].door.source, "uia");
+  assert.equal(state.devices[0].batch.observation.lines[0].source, "uia");
+  assert.equal(state.devices[0].readingAccuracy[0].percent, null);
+  const check = {
+    deviceId: d.deviceId,
+    batchId: b.id,
+    index: 0,
+    expectedRoom: "101",
+    expectedCode: "DOOR_OPEN",
+    confirmed: true,
+  };
+  for (const index of [0, 0, 1])
+    assert.equal(
+      (
+        await req(
+          a.url,
+          "/api/reading-checks",
+          { ...check, index },
+          a.store.adminToken,
+        )
+      ).status,
+      200,
+    );
+  state = a.store.snapshot();
+  assert.deepEqual(
+    state.devices[0].readingAccuracy.map((c) => [
+      c.source,
+      c.total,
+      c.matched,
+      c.percent,
+    ]),
+    [
+      ["uia", 1, 1, 100],
+      ["ocr", 1, 0, 0],
+    ],
+  );
+  assert.equal(
+    state.devices[0].verification.status,
+    "pending",
+    "Accuracy reviews cannot certify physical commissioning",
+  );
+  assert.equal(
+    (
+      await req(
+        a.url,
+        "/api/reading-checks",
+        { ...check, index: 25 },
+        a.store.adminToken,
+      )
+    ).status,
+    400,
+  );
+  const next = fieldBatch(d, "DOOR_OPEN", {
+    channelReadings: b.observation.channelReadings,
+    readerVersion: "0.4.1",
+  });
+  assert.equal(
+    (await req(a.agentUrl, "/agent/observations", next, d.token)).status,
+    200,
+  );
+  assert.equal(
+    a.store.snapshot().devices[0].readingAccuracy[0].percent,
+    null,
+    "New reader has a separate denominator",
+  );
+  assert.equal(
+    (await req(a.url, "/api/reading-checks", check, a.store.adminToken)).status,
+    400,
+    "Old scope cannot be reviewed as current",
+  );
+});

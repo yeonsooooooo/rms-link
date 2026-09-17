@@ -1,3 +1,9 @@
+const sourceName = (source) =>
+  ({
+    uia: "글자 직접 읽기",
+    ocr: "사진에서 읽기(OCR)",
+    hybrid: "직접 읽기 · OCR도 일치",
+  })[source] ?? "읽기 방식 기록 없음";
 const root = document.querySelector("#app");
 let state = null,
   selectedHotel = "",
@@ -111,7 +117,7 @@ const empty = (title, text, icon = "⌁", action = "") =>
   `<div class="empty"><div class="empty-icon">${icon}</div><strong>${title}</strong>${text}${action}</div>`;
 function devicesTable() {
   return state.devices.length
-    ? `<div class="table-scroll"><table><thead><tr><th>호텔 · 기기</th><th>연동 상태</th><th>수집 경로</th><th>마지막 연결</th><th>앱 / 프로필</th><th>전송 대기</th><th></th></tr></thead><tbody>${state.devices.map((d) => `<tr class="clickable" data-device="${d.id}"><td><strong>호텔 ${escape(d.hotel_id || "등록 중")}</strong><small>${escape(d.machine)}</small></td><td>${badge(statusNames[d.status], d.status === "collecting" ? "green" : d.status === "attention" ? "amber" : "")}</td><td>${escape(d.batch?.observation.source === "hybrid" ? "접근성 + OCR 대조" : d.batch?.observation.source === "uia" ? "접근성 텍스트" : d.batch?.observation.source === "ocr" ? "화면 OCR" : "탐색 중")}<small>${escape(d.diagnosis[0]?.title || "")}</small></td><td>${ago(d.last_seen)}<small>${when(d.last_seen)}</small></td><td>${escape(d.version || "—")} <small>프로필 r${d.profile_revision}</small></td><td>${d.pending}건</td><td>↗</td></tr>`).join("")}</tbody></table></div>`
+    ? `<div class="table-scroll"><table><thead><tr><th>호텔 · 기기</th><th>연동 상태</th><th>수집 경로</th><th>마지막 연결</th><th>앱 / 프로필</th><th>전송 대기</th><th></th></tr></thead><tbody>${state.devices.map((d) => `<tr class="clickable" data-device="${d.id}"><td><strong>호텔 ${escape(d.hotel_id || "등록 중")}</strong><small>${escape(d.machine)}</small></td><td>${badge(statusNames[d.status], d.status === "collecting" ? "green" : d.status === "attention" ? "amber" : "")}</td><td>${escape(d.readingMethods?.title || sourceName(d.batch?.observation.source))}<small>${escape(d.diagnosis[0]?.title || "")}</small></td><td>${ago(d.last_seen)}<small>${when(d.last_seen)}</small></td><td>${escape(d.version || "—")} <small>프로필 r${d.profile_revision}</small></td><td>${d.pending}건</td><td>↗</td></tr>`).join("")}</tbody></table></div>`
     : empty(
         "첫 호텔의 연결을 기다리고 있습니다",
         "Windows에 RmsLink를 설치하고 hotel_id를 입력하면<br>이곳에서 키텍 수집 상태를 바로 확인할 수 있습니다.",
@@ -132,7 +138,7 @@ function roomField(field) {
       );
 }
 function roomsPanel() {
-  return `<section class="panel"><div class="panel-head"><div><h2>객실별 키텍 상태 <span class="sub">${state.rooms.length}개 객실</span></h2><p class="sub">문 상태와 키 상태는 각각의 관측 시각을 기준으로 표시합니다.</p></div>${badge("현재 화면 · 이벤트 근거 구분", "blue")}</div>${state.rooms.length ? `<div class="room-grid">${state.rooms.map((r) => `<div class="room"><strong>${escape(r.room)} <span class="sub">호</span></strong><div class="room-row">문 상태 ${roomField(r.door)}</div><div class="room-row">키 상태 ${roomField(r.key)}</div><small>호텔 ${escape(r.hotelId)} · ${escape(r.key.reason)}</small><small>키 근거 ${when(r.key.at)}</small><small>문 근거 ${when(r.door.at)}</small></div>`).join("")}</div>` : empty("확인된 객실 정보가 아직 없습니다", "문 열림·닫힘, 키 삽입·제거가 관측되면<br>객실별로 상태와 근거 시각을 표시합니다.", "▦")}<div class="notice">이벤트 로그는 마지막 이벤트에서 추정한 상태입니다. 현재 화면 관측은 1분, 이벤트 근거는 5분이 지나거나 기기 연결이 끊기면 ‘오래된 관측’으로 바뀝니다.</div></section>`;
+  return `<section class="panel"><div class="panel-head"><div><h2>객실별 키텍 상태 <span class="sub">${state.rooms.length}개 객실</span></h2><p class="sub">문 상태와 키 상태는 각각의 관측 시각을 기준으로 표시합니다.</p></div>${badge("현재 화면 · 이벤트 근거 구분", "blue")}</div>${state.rooms.length ? `<div class="room-grid">${state.rooms.map((r) => `<div class="room"><strong>${escape(r.room)} <span class="sub">호</span></strong><div class="room-row">문 상태 ${roomField(r.door)}</div><div class="room-row">키 상태 ${roomField(r.key)}</div><small>호텔 ${escape(r.hotelId)} · ${escape(r.key.reason)}</small><small>키 근거 ${when(r.key.at)} · ${sourceName(r.key.source)}</small><small>문 근거 ${when(r.door.at)} · ${sourceName(r.door.source)}</small></div>`).join("")}</div>` : empty("확인된 객실 정보가 아직 없습니다", "문 열림·닫힘, 키 삽입·제거가 관측되면<br>객실별로 상태와 근거 시각을 표시합니다.", "▦")}<div class="notice">이벤트 로그는 마지막 이벤트에서 추정한 상태입니다. 현재 화면 관측은 1분, 이벤트 근거는 5분이 지나거나 기기 연결이 끊기면 ‘오래된 관측’으로 바뀝니다.</div></section>`;
 }
 function jobsPanel() {
   return `<section class="panel"><div class="panel-head"><div><h2>개선 진행 현황</h2><p class="sub">관측 → 원인 분석 → 검증 → 자동 업데이트</p></div>${badge(state.worker.enabled ? "자동 분석 켜짐" : "자동 분석 꺼짐", "green")}</div><div class="flow"><span>01 수집</span>→<span>02 화면 분석</span>→<span>03 검증</span>→<span>04 배포</span></div>${
@@ -158,7 +164,7 @@ function eventPanel() {
           .slice(0, view === "events" ? 100 : 8)
           .map(
             (e) =>
-              `<tr><td class="nowrap">${when(e.occurred_at)}</td><td>${escape(e.hotel_id)}</td><td><strong>${escape(e.room)}호</strong></td><td>${badge(labels[e.code] || e.code, e.code.includes("IN") || e.code === "DOOR_OPEN" ? "amber" : "green")}</td><td>${e.kind === "snapshot" ? "현재 화면" : "이벤트 로그"}<small>${escape(e.raw_line)}</small></td></tr>`,
+              `<tr><td class="nowrap">${when(e.occurred_at)}</td><td>${escape(e.hotel_id)}</td><td><strong>${escape(e.room)}호</strong></td><td>${badge(labels[e.code] || e.code, e.code.includes("IN") || e.code === "DOOR_OPEN" ? "amber" : "green")}</td><td>${e.kind === "snapshot" ? "현재 화면" : "이벤트 로그"}<small>${sourceName(e.source)}</small><small>${escape(e.raw_line)}</small></td></tr>`,
           )
           .join("")}</tbody></table></div>`
       : empty(
@@ -216,6 +222,23 @@ function readingStatus(d) {
     ${v?.profileCurrent === false ? "<p>새 호텔 규칙을 기기에 적용한 뒤 다시 확인하세요.</p>" : ""}</div>
     ${(o?.warnings ?? []).map((w) => `<div class="notice">${escape(w.includes(":") ? w.slice(w.indexOf(":") + 1).trim() : w)}</div>`).join("")}`;
 }
+function methodsPanel(d) {
+  const m = d.readingMethods,
+    o = d.batch?.observation;
+  if (!m) return "";
+  const current = d.online && d.captureFresh;
+  return `<div class="notice reading-methods"><h3>어떻게 읽었나요?</h3>
+    ${!current ? "<p><b>이전 수집 결과입니다. 다시 연결된 뒤 현재 화면을 확인하세요.</b></p>" : ""}
+    <b>${escape(m.title)}</b><p>${escape(m.detail)}</p><p>${escape(m.ocrDetail || "")}</p>
+    ${m.uia ? `<div class="table-scroll"><table><thead><tr><th>읽기 방법</th><th>가져온 글자</th><th>해석한 상태</th><th>사용한 상태</th></tr></thead><tbody>${["uia", "ocr"].map((source) => `<tr><td>${sourceName(source)}</td><td>${m[source].lineCount}줄</td><td>${m[source].candidateCount}개</td><td>${m[source].acceptedCount}개</td></tr>`).join("")}</tbody></table></div><p>이번 화면의 건수입니다. 두 방법이 같은 상태를 읽으면 양쪽에 표시됩니다. 확인 대기·충돌·오류가 있으면 사용하지 않습니다.</p>` : ""}
+    <h3>사람이 대조한 샘플의 정확도</h3>
+    <p>실제 객실 번호와 문·키 상태를 확인해 맞음과 틀림을 모두 기록하세요. 자동 대조만으로는 정확도를 계산하지 않습니다.</p>
+    <div class="table-scroll"><table><thead><tr><th>읽기 방법</th><th>대조한 샘플</th><th>맞음 / 틀림</th><th>샘플 정답률</th></tr></thead><tbody>${(d.readingAccuracy ?? []).map((a) => `<tr><td>${sourceName(a.source)}</td><td>${a.total}개</td><td>${a.matched} / ${a.mismatched}</td><td>${a.percent === null ? "아직 측정하지 않음" : a.percent + "%"}</td></tr>`).join("")}</tbody></table></div>
+    <p>직접 선택해 대조한 샘플만의 비율입니다. 읽지 못한 행과 아직 대조하지 않은 결과는 포함되지 않으며, 전체 객실 정확도를 뜻하지 않습니다. 같은 원문은 중복 집계하지 않고 앱·화면·규칙이 바뀌면 새로 집계합니다.</p>
+    ${o?.channelReadings?.length ? `<button data-action="reading-check" data-id="${d.id}">방법별 결과 맞음·틀림 기록</button>` : ""}
+    <p>Accessibility Insights를 별도로 실행할 필요는 없습니다. 글자 직접 읽기는 Windows의 UI Automation 기능을 사용합니다.</p>
+    </div>`;
+}
 function detailPanel() {
   const d = state.devices.find((x) => x.id === selectedDevice);
   if (!d) return "";
@@ -225,7 +248,7 @@ function detailPanel() {
     !d.captureFresh ||
     Date.now() - Date.parse(d.evidence?.captured_at) > 15000 ||
     (o?.errors?.length && !o.errors.every((e) => e.startsWith("UIA_")));
-  return `<section class="panel"><div class="panel-head"><h2>호텔 ${escape(d.hotel_id)} · ${escape(d.machine)}</h2><button data-action="close-detail">닫기 ×</button></div><div class="detail">${readingStatus(d)}<div class="actions">${state.capabilities?.includes("screen-reading-v2") ? `<button data-action="screen-settings" data-hotel="${escape(d.hotel_id)}">화면·객실 설정</button><button data-action="field-check" data-id="${d.id}">실제 문·키 동작 확인</button>` : ""}<button class="primary" data-action="analyze" data-id="${d.id}">지금 화면 분석</button><button data-action="profile" data-hotel="${escape(d.hotel_id)}">호텔별 규칙 편집</button><button data-action="label" data-hotel="${escape(d.hotel_id)}">확인한 판독 샘플 등록</button></div>${d.diagnosis.map((x) => `<div class="errorbanner"><b>${escape(x.title)}</b><br>${escape(x.action)}<p>${escape(x.detail)}</p></div>`).join("")}<div class="notice"><b>선택한 키텍 앱: ${escape(o?.selectedApp?.name || o?.windows?.[0]?.title || "앱 선택 대기")}</b><br>실행 프로그램: ${escape(o?.selectedApp?.process || o?.windows?.[0]?.process || "—")} · 화면 수집 ${ago(d.batch?.captured_at)}<br>이미지: ${d.evidence ? when(d.evidence.captured_at) : "수신 대기"} ${d.evidence ? badge(staleImage ? "마지막 저장 화면 · 현재 화면 확인 필요" : "최근 수집 화면", staleImage ? "amber" : "green") : ""}<br>화면 이미지는 최대 5초 간격, 텍스트는 기본 1.5초 간격으로 수집합니다.</div><p>업데이트: ${escape(d.update_status || "아직 보고되지 않음")} · 화면 관측 ${when(d.batch?.captured_at)}</p>${d.evidence ? `<img src="/api/evidence/${d.evidence.id}" alt="호텔 ${escape(d.hotel_id)}에서 전송한 RMS 수집 화면">` : '<div class="notice">전송된 화면 이미지가 없습니다. 기기에서 진단 화면 공유 여부를 확인해 주세요.</div>'}<h3>판독 원문과 실패 사유</h3><pre>${escape((o?.lines ?? []).map((l) => `${l.room || "—"}  ${l.code ? labels[l.code] || l.code : l.reason}  │ ${l.text}`).join("\n") || "판독 내용이 아직 없습니다.")}</pre><h3>Windows 환경</h3><pre>${escape(JSON.stringify({ os: o?.os, source: o?.source, ocrLanguage: o?.ocrLanguage, desktopAvailable: o?.desktopAvailable, remoteSession: o?.remoteSession, windows: o?.windows, regions: o?.regions }, null, 2))}</pre></div></section>`;
+  return `<section class="panel"><div class="panel-head"><h2>호텔 ${escape(d.hotel_id)} · ${escape(d.machine)}</h2><button data-action="close-detail">닫기 ×</button></div><div class="detail">${readingStatus(d)}${methodsPanel(d)}<div class="actions">${state.capabilities?.includes("screen-reading-v2") ? `<button data-action="screen-settings" data-hotel="${escape(d.hotel_id)}">화면·객실 설정</button><button data-action="field-check" data-id="${d.id}">실제 문·키 동작 확인</button>` : ""}<button class="primary" data-action="analyze" data-id="${d.id}">지금 화면 분석</button><button data-action="profile" data-hotel="${escape(d.hotel_id)}">호텔별 규칙 편집</button><button data-action="label" data-hotel="${escape(d.hotel_id)}">확인한 판독 샘플 등록</button></div>${d.diagnosis.map((x) => `<div class="errorbanner"><b>${escape(x.title)}</b><br>${escape(x.action)}<p>${escape(x.detail)}</p></div>`).join("")}<div class="notice"><b>선택한 키텍 앱: ${escape(o?.selectedApp?.name || o?.windows?.[0]?.title || "앱 선택 대기")}</b><br>실행 프로그램: ${escape(o?.selectedApp?.process || o?.windows?.[0]?.process || "—")} · 화면 수집 ${ago(d.batch?.captured_at)}<br>이미지: ${d.evidence ? when(d.evidence.captured_at) : "수신 대기"} ${d.evidence ? badge(staleImage ? "마지막 저장 화면 · 현재 화면 확인 필요" : "최근 수집 화면", staleImage ? "amber" : "green") : ""}<br>화면 이미지는 최대 5초 간격, 텍스트는 기본 1.5초 간격으로 수집합니다.</div><p>업데이트: ${escape(d.update_status || "아직 보고되지 않음")} · 화면 관측 ${when(d.batch?.captured_at)}</p>${d.evidence ? `<img src="/api/evidence/${d.evidence.id}" alt="호텔 ${escape(d.hotel_id)}에서 전송한 RMS 수집 화면">` : '<div class="notice">전송된 화면 이미지가 없습니다. 기기에서 진단 화면 공유 여부를 확인해 주세요.</div>'}<h3>판독 원문과 실패 사유</h3><pre>${escape((o?.lines ?? []).map((l) => `${sourceName(l.source)} │ ${l.room || "—"}  ${l.code ? labels[l.code] || l.code : l.reason}  │ ${l.text}`).join("\n") || "판독 내용이 아직 없습니다.")}</pre><h3>Windows 환경</h3><pre>${escape(JSON.stringify({ os: o?.os, source: o?.source, ocrLanguage: o?.ocrLanguage, desktopAvailable: o?.desktopAvailable, remoteSession: o?.remoteSession, windows: o?.windows, regions: o?.regions }, null, 2))}</pre></div></section>`;
 }
 function updatesPanel() {
   return `<section class="panel"><div class="panel-head"><h2>앱 업데이트</h2>${badge("서명 · 무결성 검사", "green")}</div>${state.releases.length ? `<div class="table-scroll"><table><thead><tr><th>버전</th><th>상태</th><th>패키지</th><th>준비 시각</th></tr></thead><tbody>${state.releases.map((r) => `<tr><td><strong>${escape(r.version)}</strong></td><td>${badge(r.status === "active" ? "자동 업데이트 제공" : r.status, "green")}</td><td>${(r.size / 1024 / 1024).toFixed(1)} MB<small>SHA-256 ${r.sha256.slice(0, 20)}…</small></td><td>${when(r.created_at)}</td></tr>`).join("")}</tbody></table></div>` : empty("검증된 앱 패키지를 준비하고 있습니다", "배포되면 설치된 RmsLink가 자동으로 최신 버전을 확인합니다.", "↓")}<div class="notice">앱은 2분마다 업데이트를 확인합니다. Windows 트레이 메뉴의 ‘지금 업데이트 확인 · 적용’으로 수동 업데이트도 가능합니다. 새 앱 실행 확인에 실패하면 이전 버전으로 복구합니다.</div></section><section class="panel"><div class="panel-head"><h2>호텔별 판독 규칙</h2></div>${state.profiles.length ? `<div class="table-scroll"><table><thead><tr><th>호텔</th><th>규칙</th><th>상태</th><th>배포 시각</th><th></th></tr></thead><tbody>${state.profiles.map((p) => `<tr><td>${escape(p.hotel_id)}</td><td>${escape(p.body.name)} · r${p.revision}</td><td>${badge(p.status === "active" ? "현재 배포" : "이전 규칙", p.status === "active" ? "green" : "")}</td><td>${when(p.created_at)}</td><td>${p.status !== "active" ? `<button data-action="rollback" data-hotel="${escape(p.hotel_id)}" data-revision="${p.revision}">이 규칙으로 복구</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : empty("공통 키텍 규칙으로 시작합니다", "호텔별 차이가 확인되면 해당 호텔에만 새 규칙을 적용합니다.", "◇")}</section>`;
@@ -405,6 +428,44 @@ root.addEventListener("click", async (e) => {
         );
         break;
       }
+      case "reading-check": {
+        const d = state.devices.find((d) => d.id === el.dataset.id),
+          batch = d?.batch;
+        const choices = batch?.observation.channelReadings ?? [];
+        if (!choices.length) {
+          toast("새 화면의 읽기 결과를 기다려 주세요.");
+          break;
+        }
+        openModal(
+          "방법별 읽기 결과 대조",
+          `<p>원문과 실제 객실 상태를 직접 확인하세요. 틀린 판독도 그대로 기록하며, 이 기록은 실제 객실 상태나 판독 규칙을 바꾸지 않습니다.</p>
+          <label>대조할 결과<select id="reading-index">${choices.map((r, i) => `<option value="${i}">${sourceName(r.source)} · ${escape(r.room)}호 · ${escape(labels[r.code])} · ${escape(r.rawLine)}</option>`).join("")}</select></label>
+          <label>직접 확인한 실제 객실 번호<input id="reading-room" maxlength="30" placeholder="예: 101"></label>
+          <label>직접 확인한 실제 상태<select id="reading-code"><option value="">선택하세요</option>${Object.entries(
+            labels,
+          )
+            .map(
+              ([code, label]) =>
+                `<option value="${code}">${escape(label)}</option>`,
+            )
+            .join("")}</select></label>
+          <label class="check-label"><input id="reading-confirm" type="checkbox"> 실제 화면과 객실의 문·키 상태를 직접 대조했습니다.</label>`,
+          async (m) => {
+            if (!m.querySelector("#reading-confirm").checked)
+              throw Error("실제 상태를 먼저 확인해 주세요.");
+            await api("/api/reading-checks", {
+              deviceId: d.id,
+              batchId: batch.id,
+              index: Number(m.querySelector("#reading-index").value),
+              expectedRoom: m.querySelector("#reading-room").value.trim(),
+              expectedCode: m.querySelector("#reading-code").value,
+              confirmed: true,
+            });
+            toast("맞음·틀림을 해당 읽기 방법의 대조 기록에 저장했습니다.");
+          },
+        );
+        break;
+      }
       case "field-check": {
         const d = state.devices.find((d) => d.id === el.dataset.id),
           batch = d?.batch;
@@ -418,7 +479,7 @@ root.addEventListener("click", async (e) => {
         openModal(
           "실제 문·키 동작과 대조",
           `<p>한 시험 객실에서 문 열기·닫기, 손님 키 꽂기·빼기를 순서대로 실행하세요. 아래 값이 직접 확인한 동작과 일치할 때만 저장합니다.</p>
-          <label>대조할 최근 판독<select id="field-reading">${choices.map((r, i) => `<option value="${i}">${escape(r.room)}호 · ${escape(labels[r.code])} · ${escape(r.rawLine)}</option>`).join("")}</select></label>
+          <label>대조할 최근 판독<select id="field-reading">${choices.map((r, i) => `<option value="${i}">${escape(r.room)}호 · ${escape(labels[r.code])} · ${sourceName(r.source)} · ${escape(r.rawLine)}</option>`).join("")}</select></label>
           <label class="check-label"><input type="checkbox" id="field-confirm"> 실제 객실에서 수행한 동작과 화면·판독 결과가 일치함을 확인했습니다.</label>`,
           async (m) => {
             if (!m.querySelector("#field-confirm").checked)

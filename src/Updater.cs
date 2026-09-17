@@ -23,7 +23,10 @@ public static class Updater
     public static async Task Stage(HttpClient http,AppConfig cfg,ReleaseOffer release,CancellationToken ct)
     {
         if(!System.Text.RegularExpressions.Regex.IsMatch(release.Version,@"^\d+\.\d+\.\d+$")||!System.Text.RegularExpressions.Regex.IsMatch(release.Sha256,@"^[a-f0-9]{64}$")||release.Path!="agent/packages/"+release.Sha256||release.Size<1000||release.Size>300_000_000)throw new Exception("업데이트 패키지 정보 오류");
+        using var deadline=CancellationTokenSource.CreateLinkedTokenSource(ct);deadline.CancelAfter(TimeSpan.FromMinutes(5));ct=deadline.Token;
         string root=AppConfig.InstallDir,versionDir=Path.Combine(root,"versions",release.Version),stage=versionDir+".staging",zip=Path.Combine(root,"update.zip");
+        var launcher=Path.Combine(root,"RmsLinkLauncher.exe");
+        if(!File.Exists(launcher))throw new Exception("설치 관리자가 없습니다. 설치 파일로 먼저 설치해 주세요.");
         Directory.CreateDirectory(root);
         using(var response=await http.GetAsync(release.Path,HttpCompletionOption.ResponseHeadersRead,ct)) {
             response.EnsureSuccessStatusCode();using var input=await response.Content.ReadAsStreamAsync(ct);using var output=File.Create(zip);
@@ -54,8 +57,6 @@ public static class Updater
         // Separate launcher owns the version pointer and rollback watchdog.
         File.WriteAllText(Path.Combine(root,"pending.json.tmp"),JsonDefaults.Serialize(new {version=release.Version,previous=Version}));
         File.Move(Path.Combine(root,"pending.json.tmp"),Path.Combine(root,"pending.json"),true);
-        var launcher=Path.Combine(root,"RmsLinkLauncher.exe");
-        if(!File.Exists(launcher))throw new Exception("설치 관리자가 없습니다. 설치 파일로 먼저 설치해 주세요.");
         var psi=new ProcessStartInfo(launcher){UseShellExecute=false};psi.ArgumentList.Add("--update");psi.ArgumentList.Add(Environment.ProcessId.ToString());Process.Start(psi);
     }
 }

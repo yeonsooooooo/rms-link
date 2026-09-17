@@ -86,7 +86,7 @@ public static class WindowProbe
         if(!ClientToScreen(handle,ref origin))return false;
         r.R+=origin.X;r.B+=origin.Y;r.L+=origin.X;r.T+=origin.Y;return true;
     }
-    public static bool SameGeometry(WindowCandidate selected)=>GetCaptureRect(new(selected.Handle),out var r)&&r.L==selected.X&&r.T==selected.Y&&r.R-r.L==selected.W&&r.B-r.T==selected.H;
+    public static bool SameGeometry(WindowCandidate selected)=>GetWindowThreadProcessId(new(selected.Handle),out var pid)>0 && pid==selected.ProcessId && GetCaptureRect(new(selected.Handle),out var r)&&r.L==selected.X&&r.T==selected.Y&&r.R-r.L==selected.W&&r.B-r.T==selected.H;
 
     public static List<string> ReadAccessibleRows(WindowCandidate window)
     {
@@ -101,7 +101,14 @@ public static class WindowProbe
                 var words=new List<string>(); if(!string.IsNullOrWhiteSpace(current.Name))words.Add(current.Name);
                 var child=walker.GetFirstChild(e);int cells=0;
                 while(child!=null && cells++<20){var n=child.Current.Name;if(string.IsNullOrWhiteSpace(n)&&child.TryGetCurrentPattern(ValuePattern.Pattern,out var value))n=((ValuePattern)value).Current.Value;if(!string.IsNullOrWhiteSpace(n)&&!words.Contains(n))words.Add(n);child=walker.GetNextSibling(child);}
-                if(words.Count>0)list.Add(string.Join(" ",words));
+                if(words.Count>0)list.Add(AccessibleRowLayout.Join(words[0],words.Skip(1)));
+                continue;
+            }
+            if(!current.IsOffscreen && !current.IsPassword && (current.ControlType==ControlType.Document || current.ControlType==ControlType.Edit)
+                && e.TryGetCurrentPattern(TextPattern.Pattern,out var textPattern)) {
+                // Only visible ranges: do not ingest a scrolled-away history as current screen content.
+                foreach(var range in ((TextPattern)textPattern).GetVisibleRanges().Take(100))
+                    list.AddRange(range.GetText(32000).Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries).Where(line=>line.Length<=1000).Take(300));
                 continue;
             }
             if(!current.IsOffscreen && current.ControlType==ControlType.Text && !string.IsNullOrWhiteSpace(current.Name))list.Add(current.Name);

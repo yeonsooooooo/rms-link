@@ -23,6 +23,7 @@ public static class Diagnostics
         using var form=new Form{Text="RmsLink native test fixture",ClientSize=new(700,380),StartPosition=FormStartPosition.Manual,Location=new(30,30),BackColor=Color.White};
         form.Controls.Add(new Label{Text="101 DOOR OPEN",AutoSize=true,Location=new(40,50),Font=new("Arial",22)});
         form.Controls.Add(new Label{Text="102 KEY IN",AutoSize=true,Location=new(40,120),Font=new("Arial",22)});
+        form.Controls.Add(new TextBox{Text="103 DOOR OPEN",ReadOnly=true,Multiline=true,Location=new(40,200),Size=new(550,65),Font=new("Arial",22)});
         using var timer=new System.Windows.Forms.Timer{Interval=90000};timer.Tick+=(_,_)=>form.Close();timer.Start();Application.Run(form);return 0;
     }
     static object NativeCaptureTest(string folder)
@@ -38,10 +39,10 @@ public static class Diagnostics
             if(WindowProbe.Find(new SelectedApplication{Executable=@"C:\missing-vendor-app.exe"}).Count!=0)throw new Exception("Unrelated app fallback detected");
             using var capture=new WindowCapture();
             var result=Task.Run(()=>capture.Read(w)).GetAwaiter().GetResult();using(result.Image){if(result.Image.Width!=w.W||result.Image.Height!=w.H)throw new Exception("Window capture size mismatch");result.Image.Save(Path.Combine(folder,"native-selected-window.png"));}
-            var profile=new AdapterProfile{Mode="snapshot",ExpectedRooms=new(){"101","102"},Aliases=new(){["DOOR OPEN"]="DOOR_OPEN",["KEY IN"]="KEY_IN"}};
+            var profile=new AdapterProfile{Mode="snapshot",ExpectedRooms=new(){"101","102","103"},Aliases=new(){["DOOR OPEN"]="DOOR_OPEN",["KEY IN"]="KEY_IN"}};
             var uia=Task.Run(()=>WindowProbe.ReadAccessibleRows(w));
             if(!uia.Wait(5000))throw new Exception("Fixture accessibility timeout");
-            if(new ReadingSession().Read(uia.Result,Array.Empty<string>(),profile,DateTimeOffset.Now,"fixture").Events.Count!=2)throw new Exception("Native accessibility rows not parsed");
+            if(new ReadingSession().Read(uia.Result,Array.Empty<string>(),profile,DateTimeOffset.Now,"fixture").Events.Count!=3)throw new Exception("Native accessibility rows not parsed");
             var ocr=OcrService.Create()??throw new Exception("Windows OCR engine unavailable");
             var reader=new ReadingSession();
             for(int i=0;i<2;i++) {
@@ -49,7 +50,7 @@ public static class Diagnostics
                 using(frame.Image) {
                     var lines=Task.Run(()=>ocr.ReadLinesAsync(frame.Image,2)).GetAwaiter().GetResult();
                     var parsed=reader.Read(Array.Empty<string>(),lines,profile,DateTimeOffset.Now,"fixture");
-                    if(parsed.Events.Count!=(i==0?0:2))throw new Exception("Native OCR consensus failed: "+JsonDefaults.Serialize(lines));
+                    if(parsed.Events.Count!=(i==0?0:3))throw new Exception("Native OCR consensus failed: "+JsonDefaults.Serialize(lines));
                 }
             }
             // A real overlapping window exercises PrintWindow, not screen pixels from another app.
@@ -78,7 +79,7 @@ public static class Diagnostics
             if(!branded.Icon.Contains("keytech.ico"))throw new Exception("Keytech icon missing");
             File.Delete(original);
             using var picker=new AppPickerForm();picker.Show();Application.DoEvents();using(var shot=new Bitmap(picker.Width,picker.Height)){picker.DrawToBitmap(shot,new Rectangle(0,0,shot.Width,shot.Height));shot.Save(Path.Combine(folder,"native-app-picker.png"));}picker.Close();
-            return new{shortcutArgumentsPreserved=true,keytechIcon=true,formConstruction=true,windowEnumeration=true,explicitSelection=true,unrelatedAppRejected=true,windowCapture=true,minimizedRejected=true,minimizedRestored=true,accessibilityParsed=true,ocrConsensus=true,occludedCapture=true,handleRecovery=true,fixtureOnly=true};
+            return new{shortcutArgumentsPreserved=true,keytechIcon=true,formConstruction=true,windowEnumeration=true,explicitSelection=true,unrelatedAppRejected=true,windowCapture=true,minimizedRejected=true,minimizedRestored=true,accessibilityParsed=true,visibleTextPattern=true,ocrConsensus=true,occludedCapture=true,handleRecovery=true,fixtureOnly=true};
         }finally{if(!fixture.HasExited){fixture.Kill();fixture.WaitForExit(5000);}}
     }
     public static int RunSelfTest()
