@@ -750,3 +750,17 @@ td small {
     break-inside: avoid;
   }
 }
+
+.check-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.check-label input {
+  width: auto;
+  flex: none;
+  margin-top: 5px;
+}
+.notice {
+  overflow-wrap: anywhere;
+}

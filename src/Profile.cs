@@ -12,6 +12,9 @@ public sealed class AdapterProfile
     public string RoomPattern { get; set; } = @"(?<![\p{L}\d:])(\d{3,4})\s*호?(?![\d:])";
     public Dictionary<string, string> Aliases { get; set; } = new();
     public Dictionary<string, string> RoomMap { get; set; } = new();
+    public List<string> ExpectedRooms { get; set; } = new();
+    // A hotel-confirmed on-screen refresh timestamp; capture group 1 is HH:mm:ss.
+    public string LiveClockPattern { get; set; } = "";
     public int PollMs { get; set; } = 1500;
     public int OcrScale { get; set; } = 3;
     public static readonly HashSet<string> Codes = new(new[] { "DOOR_OPEN", "DOOR_CLOSE", "KEY_IN", "KEY_OUT", "KEY_IN_GUEST", "KEY_OUT_GUEST", "KEY_IN_CLEAN", "KEY_OUT_CLEAN" });
@@ -23,6 +26,9 @@ public sealed class AdapterProfile
         if (rx.GetGroupNumbers().Length < 2) throw new Exception("객실 패턴에 첫 번째 캡처 그룹이 필요합니다.");
         foreach (var a in Aliases) if (a.Key.Length < 2 || a.Key.Length > 40 || !Codes.Contains(a.Value)) throw new Exception("이벤트 사전 오류");
         foreach (var r in RoomMap) if (r.Key.Length > 30 || !Regex.IsMatch(r.Value, @"^[\p{L}\d_-]{1,30}$")) throw new Exception("객실 매핑 오류");
+        if(ExpectedRooms.Count>500 || ExpectedRooms.Distinct().Count()!=ExpectedRooms.Count || ExpectedRooms.Any(r=>!Regex.IsMatch(r,@"^[\p{L}\d_-]{1,30}$"))) throw new Exception("객실 목록 오류");
+        if(LiveClockPattern.Length>200) throw new Exception("화면 갱신 시각 패턴 범위 오류");
+        if(LiveClockPattern.Length>0 && new Regex(LiveClockPattern,RegexOptions.None,TimeSpan.FromMilliseconds(50)).GetGroupNumbers().Length<2) throw new Exception("갱신 시각 패턴에 HH:mm:ss 캡처 그룹이 필요합니다.");
     }
     public static AdapterProfile Load(string hotel)
     {

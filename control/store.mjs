@@ -51,6 +51,8 @@ export class Store {
   CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,at TEXT,type TEXT,hotel_id TEXT,detail TEXT);
   CREATE TABLE IF NOT EXISTS enrollments(hash TEXT PRIMARY KEY,expires_at TEXT,remaining INTEGER);
   CREATE TABLE IF NOT EXISTS labels(id INTEGER PRIMARY KEY AUTOINCREMENT,hotel_id TEXT,line TEXT,room TEXT,code TEXT,created_at TEXT);
+  CREATE TABLE IF NOT EXISTS field_checks(id INTEGER PRIMARY KEY AUTOINCREMENT,device_id TEXT,hotel_id TEXT,scope TEXT,room TEXT,code TEXT,raw_line TEXT,batch_id TEXT,confirmed_at TEXT);
+  CREATE INDEX IF NOT EXISTS field_check_scope ON field_checks(device_id,scope);
   CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT);`);
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS batch_device_session ON batches(device_id,session_id,captured_at DESC)",
@@ -210,6 +212,133 @@ export class Store {
       }
     });
   }
+  checkScope(batch) {
+    const o =
+      typeof batch?.observation === "string"
+        ? JSON.parse(batch.observation)
+        : batch?.observation;
+    if (!o?.application?.identity || !o.readerVersion) return null;
+    return digest(
+      JSON.stringify([
+        batch.hotel_id,
+        batch.profile_revision,
+        o.readerVersion,
+        o.application.identity,
+        o.selectedApp?.title,
+        o.regions,
+      ]),
+    );
+  }
+  verification(device, batch) {
+    const scope = this.checkScope(batch);
+    const checks = scope
+      ? this.all(
+          "SELECT room,code,raw_line,confirmed_at FROM field_checks WHERE device_id=? AND scope=? ORDER BY id DESC",
+          device.id,
+          scope,
+        )
+      : [];
+    const steps = ["DOOR_OPEN", "DOOR_CLOSE", "KEY_IN", "KEY_OUT"];
+    const rooms = [...new Set(checks.map((c) => c.room))]
+      .map((room) => {
+        const matched = checks.filter(
+          (c) => c.room === room && !c.code.endsWith("_CLEAN"),
+        );
+        const completed = steps.filter((step) =>
+          matched.some((c) => c.code === step || c.code === step + "_GUEST"),
+        );
+        return { room, completed };
+      })
+      .sort((a, b) => b.completed.length - a.completed.length);
+    const best = rooms[0] ?? { room: null, completed: [] };
+    const profileCurrent =
+      batch?.profile_revision === this.profile(device.hotel_id).revision;
+    return {
+      status:
+        best.completed.length === 4 && profileCurrent
+          ? "sample_verified"
+          : "pending",
+      ...best,
+      required: steps,
+      profileCurrent,
+      checks: checks.slice(0, 12),
+    };
+  }
+  confirmFieldCheck({ deviceId, batchId, room, code }) {
+    const device = this.get(
+      "SELECT * FROM devices WHERE id=? AND revoked=0",
+      deviceId,
+    );
+    const batch = this.get(
+      "SELECT * FROM batches WHERE id=? AND device_id=?",
+      batchId,
+      deviceId,
+    );
+    const latest =
+      device &&
+      this.get(
+        "SELECT * FROM batches WHERE device_id=? AND session_id=? ORDER BY captured_at DESC LIMIT 1",
+        deviceId,
+        device.session_id,
+      );
+    const scope = this.checkScope(batch);
+    const o = batch && JSON.parse(batch.observation);
+    const live = latest && JSON.parse(latest.observation);
+    if (
+      !device ||
+      !batch ||
+      !scope ||
+      batch.session_id !== device.session_id ||
+      batch.hotel_id !== device.hotel_id ||
+      scope !== this.checkScope(latest) ||
+      batch.profile_revision !== this.profile(device.hotel_id).revision ||
+      Date.now() - Date.parse(device.last_seen) > 45000 ||
+      Date.now() - Date.parse(batch.captured_at) > 120000 ||
+      Date.now() - Date.parse(latest.captured_at) > 30000 ||
+      o.errors.length ||
+      live.errors.length
+    )
+      throw new Error(
+        "현재 연결·화면·규칙과 일치하는 최근 판독만 확인할 수 있습니다. 화면을 새로 확인하세요.",
+      );
+    const reading = o.readings?.find(
+      (e) =>
+        e.room === room &&
+        e.code === code &&
+        Date.now() - Date.parse(e.occurredAt) < 120000,
+    );
+    if (
+      !reading ||
+      o.uncertainFields?.some(
+        (f) =>
+          f.room === room &&
+          f.field === (code.startsWith("DOOR") ? "door" : "key"),
+      )
+    )
+      throw new Error(
+        "최근 화면에서 확인된 객실·상태가 아닙니다. 실제 동작 후 새 판독을 기다려 주세요.",
+      );
+    this.transaction(() => {
+      this.run(
+        "INSERT INTO field_checks(device_id,hotel_id,scope,room,code,raw_line,batch_id,confirmed_at) VALUES(?,?,?,?,?,?,?,?)",
+        deviceId,
+        device.hotel_id,
+        scope,
+        room,
+        code,
+        reading.rawLine,
+        batchId,
+        new Date().toISOString(),
+      );
+      this.audit("field_check_confirmed", device.hotel_id, {
+        deviceId,
+        room,
+        code,
+        batchId,
+      });
+    });
+    return this.verification(device, latest);
+  }
   snapshot(hotel) {
     const where = hotel ? " WHERE hotel_id=?" : "";
     const args = hotel ? [hotel] : [];
@@ -249,6 +378,7 @@ export class Store {
               : "collecting",
         diagnosis,
         evidence: evidence ?? null,
+        verification: this.verification(d, batch),
         batch: batch
           ? {
               ...batch,
@@ -261,16 +391,24 @@ export class Store {
           : null,
       };
     });
+    const states = this.all(
+      "SELECT state FROM rooms" + where + " ORDER BY room",
+      ...args,
+    ).map((r) => JSON.parse(r.state));
+    for (const hotelId of new Set(
+      latest.map((d) => d.hotel_id).filter(Boolean),
+    )) {
+      for (const room of this.profile(hotelId).expectedRooms ?? [])
+        if (!states.some((r) => r.hotelId === hotelId && r.room === room))
+          states.push({ hotelId, room });
+    }
     return {
       at: new Date().toISOString(),
       devices: latest,
       hotels: this.all(
         "SELECT DISTINCT hotel_id FROM sessions ORDER BY hotel_id",
       ).map((x) => x.hotel_id),
-      rooms: this.all(
-        "SELECT state FROM rooms" + where + " ORDER BY room",
-        ...args,
-      ).map((r) => stateForRoom(JSON.parse(r.state), latest)),
+      rooms: states.map((r) => stateForRoom(r, latest)),
       events: this.all(
         "SELECT * FROM events" + where + " ORDER BY occurred_at DESC LIMIT 100",
         ...args,

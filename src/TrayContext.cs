@@ -76,6 +76,8 @@ public sealed class TrayContext : ApplicationContext
         menu.Items.Add(previewItem);
         menu.Items.Add(reselectItem);
         menu.Items.Add(_autoStartItem);
+        var restore=new ToolStripMenuItem("최소화된 키텍 창 자동 복원"){Checked=cfg.RestoreMinimized,CheckOnClick=true};
+        restore.CheckedChanged+=(_,_)=>{cfg.RestoreMinimized=restore.Checked;cfg.Save();};menu.Items.Add(restore);
         menu.Items.Add(logItem);
         menu.Items.Add(exportItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -146,7 +148,7 @@ public sealed class TrayContext : ApplicationContext
     private void Restart(bool resume)
     {
         var psi=new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath){UseShellExecute=false};
-        psi.ArgumentList.Add("--wait-pid");psi.ArgumentList.Add(Environment.ProcessId.ToString());if(resume)psi.ArgumentList.Add("--resume");
+        psi.ArgumentList.Add("--wait-pid");psi.ArgumentList.Add(Environment.ProcessId.ToString());psi.ArgumentList.Add(resume?"--resume":"--setup");
         System.Diagnostics.Process.Start(psi);ExitApp();
     }
 

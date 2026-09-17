@@ -10,6 +10,7 @@ public sealed class AppPickerForm:Form
     readonly Button confirm=new(){Text="이 화면이 키텍 앱입니다 · 연결",Dock=DockStyle.Bottom,Height=44,Enabled=false};
     readonly ImageList icons=new(){ImageSize=new(48,48),ColorDepth=ColorDepth.Depth32Bit};
     readonly WindowCapture capture=new();
+    readonly ComboBox vendor=new(){Width=180,DropDownStyle=ComboBoxStyle.DropDownList};
     string launchPath="",executable="";WindowCandidate selected;int generation;
     public SelectedApplication Selection {get;private set;}
     public AppPickerForm()
@@ -18,7 +19,8 @@ public sealed class AppPickerForm:Form
         var actions=new FlowLayoutPanel{Dock=DockStyle.Top,Height=45};
         var browse=new Button{Text="아이콘/실행 파일 찾기",Width=210};browse.Click+=(_,_)=>Browse();
         var refresh=new Button{Text="실행 중인 창 새로고침",Width=220};refresh.Click+=(_,_)=>RefreshWindows();
-        actions.Controls.AddRange(new Control[]{browse,refresh});
+        vendor.Items.AddRange(new object[]{"기타 / 모름","가람","씨리얼","루넷","더엠알","로마시스","우연티앤이"});vendor.SelectedIndex=0;
+        actions.Controls.AddRange(new Control[]{browse,refresh,new Label{Text="제조사",AutoSize=true,Padding=new(0,7,0,0)},vendor});
         var split=new SplitContainer{Dock=DockStyle.Fill,Size=new(960,540),SplitterDistance=340};
         var right=new SplitContainer{Dock=DockStyle.Fill,Size=new(600,540),Orientation=Orientation.Horizontal,SplitterDistance=210};
         windows.Columns.Add("실행 중인 앱",190);windows.Columns.Add("창 이름",420);
@@ -37,7 +39,7 @@ public sealed class AppPickerForm:Form
                 selected=w;confirm.Enabled=true;info.Text="선택한 앱: "+w.Process+" · "+w.Title+"\n미리보기가 실제 키텍 화면인지 확인한 후 아래 연결 버튼을 누르세요.";
             }catch(Exception ex){if(!IsDisposed&&current==generation)info.Text=ex.Message;}
         };
-        confirm.Click+=(_,_)=>{if(selected==null)return;Selection=new(){Name="키텍 앱",Executable=selected.Executable,LaunchPath=string.IsNullOrEmpty(launchPath)?selected.Executable:launchPath,Title=selected.Title,Handle=selected.Handle,ProcessId=selected.ProcessId};DialogResult=DialogResult.OK;Close();};
+        confirm.Click+=(_,_)=>{if(selected==null)return;Selection=new(){Vendor=vendor.Text,Name="키텍 앱",Executable=selected.Executable,LaunchPath=string.IsNullOrEmpty(launchPath)?selected.Executable:launchPath,Title=selected.Title,Handle=selected.Handle,ProcessId=selected.ProcessId};DialogResult=DialogResult.OK;Close();};
     }
     void LoadDesktop()
     {
@@ -81,7 +83,7 @@ public static class DesktopLinks
         var icon=Path.Combine(AppContext.BaseDirectory,"assets","dashboard.ico");
         File.WriteAllText(Path.Combine(desktop,"RmsLink 대시보드.url"),"[InternetShortcut]\r\nURL="+cfg.ServerUrl+"/\r\nIconFile="+icon+"\r\nIconIndex=0\r\n",System.Text.Encoding.Unicode);
         var launcher=Path.Combine(AppConfig.InstallDir,"RmsLinkLauncher.exe");
-        Link(Path.Combine(desktop,"RmsLink 연결 설정.lnk"),File.Exists(launcher)?launcher:Application.ExecutablePath,"호텔 ID 확인 · 키텍 앱 선택",Path.Combine(AppContext.BaseDirectory,"assets","dashboard.ico"));
+        ShortcutFile.Create(Path.Combine(desktop,"RmsLink 연결 설정.lnk"),Application.ExecutablePath,"호텔 ID 확인 · 키텍 앱 선택",Path.Combine(AppContext.BaseDirectory,"assets","dashboard.ico"),"--setup");
         if(cfg.SelectedApp==null)return;
         string destination=Path.Combine(desktop,"키텍 앱.lnk"),source=cfg.SelectedApp.LaunchPath;
         if(Path.GetExtension(source).Equals(".lnk",StringComparison.OrdinalIgnoreCase)&&File.Exists(source)) {

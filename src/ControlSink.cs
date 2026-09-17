@@ -20,10 +20,10 @@ public sealed class ControlSink:IDisposable
         http.BaseAddress=new Uri(cfg.ServerUrl.TrimEnd('/')+"/");http.DefaultRequestHeaders.Authorization=new("Bearer",cfg.GetToken());
         loop=Task.Run(Loop);
     }
-    public void Enqueue(object observation,IEnumerable<ParsedEvent> events)
+    public void Enqueue(object observation,IEnumerable<ParsedEvent> events,int profileRevision)
     {
         if(PendingCount>=15000)throw new IOException("오프라인 보관 한도 도달: 전송 연결과 저장 공간 확인 필요. 이벤트를 버리지 않기 위해 수집을 대기합니다.");
-        var batch=new {id=Guid.NewGuid().ToString(),deviceId=cfg.DeviceId,sessionId,hotelId=cfg.HotelId,version=Updater.Version,profileRevision=ProfileRevision,sentAt=DateTimeOffset.UtcNow,observation,events=events.Select(e=>new {e.Room,e.Code,e.Kind,e.RawLine,e.OccurredAt,e.ObservedAt}).ToArray()};
+        var batch=new {id=Guid.NewGuid().ToString(),deviceId=cfg.DeviceId,sessionId,hotelId=cfg.HotelId,version=Updater.Version,profileRevision,sentAt=DateTimeOffset.UtcNow,observation,events=events.Select(e=>new {e.Room,e.Code,e.Kind,e.RawLine,e.OccurredAt,e.ObservedAt}).ToArray()};
         var name=Path.Combine(queueDir,DateTime.UtcNow.Ticks+"-"+batch.id+".json");
         var bytes=ProtectedData.Protect(Encoding.UTF8.GetBytes(JsonDefaults.Serialize(batch)),null,DataProtectionScope.CurrentUser);
         File.WriteAllBytes(name+".tmp",bytes);File.Move(name+".tmp",name);

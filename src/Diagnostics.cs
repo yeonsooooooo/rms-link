@@ -4,6 +4,7 @@ using System.IO.Compression;
 namespace RmsLink;
 public static class Diagnostics
 {
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool ShowWindow(IntPtr handle,int command);
     public static int RuntimeTest(string output,bool native=false)
     {
         try {
@@ -20,8 +21,8 @@ public static class Diagnostics
     {
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);Application.EnableVisualStyles();
         using var form=new Form{Text="RmsLink native test fixture",ClientSize=new(700,380),StartPosition=FormStartPosition.Manual,Location=new(30,30),BackColor=Color.White};
-        form.Controls.Add(new Label{Text="101 DOOR OPEN 12:00:00",AutoSize=true,Location=new(40,50),Font=new("Arial",22)});
-        form.Controls.Add(new Label{Text="102 KEY IN 12:00:01",AutoSize=true,Location=new(40,120),Font=new("Arial",22)});
+        form.Controls.Add(new Label{Text="101 DOOR OPEN",AutoSize=true,Location=new(40,50),Font=new("Arial",22)});
+        form.Controls.Add(new Label{Text="102 KEY IN",AutoSize=true,Location=new(40,120),Font=new("Arial",22)});
         using var timer=new System.Windows.Forms.Timer{Interval=90000};timer.Tick+=(_,_)=>form.Close();timer.Start();Application.Run(form);return 0;
     }
     static object NativeCaptureTest(string folder)
@@ -37,8 +38,38 @@ public static class Diagnostics
             if(WindowProbe.Find(new SelectedApplication{Executable=@"C:\missing-vendor-app.exe"}).Count!=0)throw new Exception("Unrelated app fallback detected");
             using var capture=new WindowCapture();
             var result=Task.Run(()=>capture.Read(w)).GetAwaiter().GetResult();using(result.Image){if(result.Image.Width!=w.W||result.Image.Height!=w.H)throw new Exception("Window capture size mismatch");result.Image.Save(Path.Combine(folder,"native-selected-window.png"));}
+            var profile=new AdapterProfile{Mode="snapshot",ExpectedRooms=new(){"101","102"},Aliases=new(){["DOOR OPEN"]="DOOR_OPEN",["KEY IN"]="KEY_IN"}};
+            var uia=Task.Run(()=>WindowProbe.ReadAccessibleRows(w));
+            if(!uia.Wait(5000))throw new Exception("Fixture accessibility timeout");
+            if(new ReadingSession().Read(uia.Result,Array.Empty<string>(),profile,DateTimeOffset.Now,"fixture").Events.Count!=2)throw new Exception("Native accessibility rows not parsed");
+            var ocr=OcrService.Create()??throw new Exception("Windows OCR engine unavailable");
+            var reader=new ReadingSession();
+            for(int i=0;i<2;i++) {
+                var frame=Task.Run(()=>capture.Read(w)).GetAwaiter().GetResult();
+                using(frame.Image) {
+                    var lines=Task.Run(()=>ocr.ReadLinesAsync(frame.Image,2)).GetAwaiter().GetResult();
+                    var parsed=reader.Read(Array.Empty<string>(),lines,profile,DateTimeOffset.Now,"fixture");
+                    if(parsed.Events.Count!=(i==0?0:2))throw new Exception("Native OCR consensus failed: "+JsonDefaults.Serialize(lines));
+                }
+            }
+            // A real overlapping window exercises PrintWindow, not screen pixels from another app.
+            using(var cover=new Form{Text="RmsLink occlusion fixture",StartPosition=FormStartPosition.Manual,Bounds=new(w.X,w.Y,w.W,w.H),BackColor=Color.Magenta,TopMost=true}) {
+                cover.Show();Application.DoEvents();System.Threading.Thread.Sleep(200);
+                var behind=Task.Run(()=>capture.Read(w)).GetAwaiter().GetResult();
+                using(behind.Image) {
+                    if(behind.Method!="print-window")throw new Exception("Occluded fixture did not use PrintWindow");
+                    var lines=Task.Run(()=>ocr.ReadLinesAsync(behind.Image,2)).GetAwaiter().GetResult();
+                    if(!lines.Any(l=>l.Contains("101")))throw new Exception("Occluded window content missing");
+                }
+                cover.Close();
+            }
             var retry=WindowProbe.Find(new SelectedApplication{Executable=w.Executable,Handle=-1,Title=w.Title});if(retry.Count!=1)throw new Exception("Window handle recovery failed");
-            bool rejected=false;try{var r=Task.Run(()=>capture.Read(w with{Minimized=true})).GetAwaiter().GetResult();r.Image.Dispose();}catch(Exception ex){rejected=ex.Message.StartsWith("WINDOW_MINIMIZED:");}if(!rejected)throw new Exception("Minimized window not rejected");
+            ShowWindow(new(w.Handle),6);System.Threading.Thread.Sleep(300);
+            var minimized=WindowProbe.Find(target).Single();
+            if(!minimized.Minimized)throw new Exception("Actual fixture window not minimized");
+            bool rejected=false;try{var r=Task.Run(()=>capture.Read(minimized)).GetAwaiter().GetResult();r.Image.Dispose();}catch(Exception ex){rejected=ex.Message.StartsWith("WINDOW_MINIMIZED:");}if(!rejected)throw new Exception("Minimized window not rejected");
+            WindowProbe.Restore(minimized);System.Threading.Thread.Sleep(500);
+            if(WindowProbe.Find(target).Single().Minimized)throw new Exception("Minimized fixture restoration failed");
             string original=Path.Combine(folder,"fixture-shortcut.lnk");
             ShortcutFile.Create(original,w.Executable,"검증용 키텍",Path.Combine(AppContext.BaseDirectory,"assets","keytech.ico"),"--capture-fixture",folder);
             target.LaunchPath=original;target.Name="키텍 앱";DesktopLinks.Ensure(new AppConfig{SelectedApp=target});
@@ -47,7 +78,7 @@ public static class Diagnostics
             if(!branded.Icon.Contains("keytech.ico"))throw new Exception("Keytech icon missing");
             File.Delete(original);
             using var picker=new AppPickerForm();picker.Show();Application.DoEvents();using(var shot=new Bitmap(picker.Width,picker.Height)){picker.DrawToBitmap(shot,new Rectangle(0,0,shot.Width,shot.Height));shot.Save(Path.Combine(folder,"native-app-picker.png"));}picker.Close();
-            return new{shortcutArgumentsPreserved=true,keytechIcon=true,formConstruction=true,windowEnumeration=true,explicitSelection=true,unrelatedAppRejected=true,windowCapture=true,minimizedRejected=true,handleRecovery=true,fixtureOnly=true};
+            return new{shortcutArgumentsPreserved=true,keytechIcon=true,formConstruction=true,windowEnumeration=true,explicitSelection=true,unrelatedAppRejected=true,windowCapture=true,minimizedRejected=true,minimizedRestored=true,accessibilityParsed=true,ocrConsensus=true,occludedCapture=true,handleRecovery=true,fixtureOnly=true};
         }finally{if(!fixture.HasExited){fixture.Kill();fixture.WaitForExit(5000);}}
     }
     public static int RunSelfTest()

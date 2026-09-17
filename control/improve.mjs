@@ -122,7 +122,8 @@ export class ImprovementWorker {
     if (
       !manual &&
       (!this.enabled ||
-        !o.errors.length ||
+        (!o.errors.length &&
+          !o.warnings?.some((w) => w.startsWith("UNMATCHED_ROWS:"))) ||
         Date.now() - Date.parse(batch.captured_at) > 60000)
     )
       return { queued: false };
@@ -233,12 +234,14 @@ export class ImprovementWorker {
         mode: "events",
         roomPattern: "(?<![\\p{L}\\d:])(\\d{3,4})\\s*호?(?![\\d:])",
         roomMap: {},
+        expectedRooms: [],
       },
       base,
     );
     if (
       regression.some(
         (r, i) =>
+          r.events.length !== 1 ||
           !r.events.some(
             (e) => e.room === base[i].room && e.code === base[i].code,
           ),

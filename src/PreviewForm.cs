@@ -112,7 +112,7 @@ public sealed class PreviewForm : Form
             }
             else
             {
-                item = new ListViewItem(new[] { "무시", "-", "-", "-", $"{ld.Text}   ({ld.Reason})" });
+                item = new ListViewItem(new[] { "미확정", "-", "-", "-", $"{ld.Text}   ({ld.Reason})" });
                 item.ForeColor = Color.Gray;
             }
             _list.Items.Add(item);

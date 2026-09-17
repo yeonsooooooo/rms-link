@@ -10,6 +10,7 @@ public class CaptureRegion
 }
 public class SelectedApplication
 {
+    public string Vendor {get;set;}="기타 / 모름";
     public string Name {get;set;}=""; public string Executable {get;set;}=""; public string LaunchPath {get;set;}=""; public string Title {get;set;}=""; public long Handle {get;set;} public int ProcessId {get;set;}
 }
 public class AppConfig
@@ -24,6 +25,7 @@ public class AppConfig
     public int OcrScale {get;set;}=3;
     public bool AutoUpdate {get;set;}=true;
     public bool ShareEvidence {get;set;}=true;
+    public bool RestoreMinimized {get;set;}=true;
     public string EnrollmentCode {get;set;}="";
     public string UpdatePublicKey {get;set;}="";
     public string DeviceSecret {get;set;}=""; // DPAPI CurrentUser encrypted

@@ -27,7 +27,7 @@ static class Program
                 // Unicode Windows shell API; no locale-dependent script host.
                 foreach(var folder in new[]{Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory,Environment.SpecialFolderOption.Create),Environment.GetFolderPath(Environment.SpecialFolder.Programs,Environment.SpecialFolderOption.Create)}) {
                     Directory.CreateDirectory(folder);
-                    ShortcutFile.Create(Path.Combine(folder,"RmsLink 연결 설정.lnk"),Path.Combine(Root,"RmsLinkLauncher.exe"),"호텔 ID · 키텍 앱 선택",Path.Combine(Root,"versions",ReadCurrent(),"assets","dashboard.ico"));
+                    ShortcutFile.Create(Path.Combine(folder,"RmsLink 연결 설정.lnk"),Path.Combine(Root,"RmsLinkLauncher.exe"),"호텔 ID · 키텍 앱 선택",Path.Combine(Root,"versions",ReadCurrent(),"assets","dashboard.ico"),"--setup");
                     using var config=JsonDocument.Parse(File.ReadAllText(Path.Combine(Root,"bootstrap.json")));
                     string server=config.RootElement.GetProperty("serverUrl").GetString();
                     if(!Uri.TryCreate(server,UriKind.Absolute,out var uri)||uri.Scheme!="https")throw new Exception("대시보드 주소 오류");
@@ -57,12 +57,12 @@ static class Program
                     File.WriteAllText(Path.Combine(Root,"failed-update.json"),JsonSerializer.Serialize(new {version=next,at=DateTimeOffset.UtcNow,error="새 버전 준비 확인 실패 · 이전 버전 복구"}));Launch(previous,true);
                 } else File.Delete(Path.Combine(Root,"failed-update.json"));
                 File.Delete(pending);
-            } else Launch(ReadCurrent(),false);
+            } else Launch(ReadCurrent(),false,args.Contains("--setup"));
             return 0;
         }catch(Exception ex){File.AppendAllText(Path.Combine(Root,"installer.log"),DateTimeOffset.Now+" "+ex+Environment.NewLine);MessageBox.Show("RmsLink 설치/업데이트 실패\n"+ex.Message,"RmsLink");return 1;}
     }
     static void ValidateVersion(string v){if(!System.Text.RegularExpressions.Regex.IsMatch(v??"",@"^\d+\.\d+\.\d+$"))throw new Exception("버전 정보 오류");}
     static string ReadCurrent(){string v=File.ReadAllText(Path.Combine(Root,"current.txt")).Trim();ValidateVersion(v);return v;}
     static void WriteCurrent(string v){ValidateVersion(v);File.WriteAllText(Path.Combine(Root,"current.txt.tmp"),v);File.Move(Path.Combine(Root,"current.txt.tmp"),Path.Combine(Root,"current.txt"),true);}
-    static Process Launch(string v,bool resume){ValidateVersion(v);var p=new ProcessStartInfo(Path.Combine(Root,"versions",v,"RmsLink.exe")){UseShellExecute=false,WorkingDirectory=Root};if(resume)p.ArgumentList.Add("--resume");return Process.Start(p);}
+    static Process Launch(string v,bool resume,bool setup=false){ValidateVersion(v);var p=new ProcessStartInfo(Path.Combine(Root,"versions",v,"RmsLink.exe")){UseShellExecute=false,WorkingDirectory=Root};if(resume)p.ArgumentList.Add("--resume");if(setup)p.ArgumentList.Add("--setup");return Process.Start(p);}
 }

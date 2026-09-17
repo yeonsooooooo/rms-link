@@ -7,5 +7,7 @@
   "aliases": {},
   "roomMap": {},
   "pollMs": 1500,
-  "ocrScale": 3
+  "ocrScale": 3,
+  "expectedRooms": [],
+  "liveClockPattern": ""
 }

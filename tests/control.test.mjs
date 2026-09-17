@@ -313,3 +313,241 @@ test(
     assert.equal(a.store.profile("9").revision, 2);
   },
 );
+
+test("hybrid screen diagnostics preserve uncertainty and show unobserved configured rooms", async (t) => {
+  const a = await setup(t),
+    d = await enrolled(a);
+  a.store.run(
+    "INSERT INTO profiles VALUES(?,?,?,?,?,?)",
+    "9",
+    2,
+    JSON.stringify({
+      ...commonProfile,
+      hotelId: "9",
+      revision: 2,
+      expectedRooms: ["101", "102"],
+    }),
+    "active",
+    now(),
+    "test",
+  );
+  const b = batch(d, { profileRevision: 2 });
+  b.observation = {
+    ...b.observation,
+    source: "hybrid",
+    warnings: ["OCR_CONFIRMING: 확인 중"],
+    uncertainFields: [{ room: "101", field: "door" }],
+    coverage: {
+      mode: "events",
+      suggestedMode: "events",
+      expectedRooms: ["101", "102"],
+      observedRooms: ["101"],
+      pending: 1,
+      snapshotEvidenceAt: null,
+    },
+  };
+  assert.equal(
+    (await req(a.agentUrl, "/agent/observations", b, d.token)).status,
+    200,
+  );
+  const s = a.store.snapshot("9");
+  assert.equal(s.rooms.length, 2);
+  assert.equal(s.rooms.find((r) => r.room === "101").door.value, null);
+  assert.match(s.rooms.find((r) => r.room === "101").door.reason, /확인 필요/);
+  assert.equal(s.rooms.find((r) => r.room === "102").key.quality, "unknown");
+  assert.equal(s.devices[0].verification.status, "pending");
+});
+
+function fieldBatch(d, code, extra = {}) {
+  const b = batch(d, { events: [] });
+  b.observation = {
+    ...b.observation,
+    readerVersion: "0.4.0",
+    source: "hybrid",
+    application: {
+      identity: "a".repeat(64),
+      vendor: "가람",
+      product: "Test fixture",
+      version: "1",
+    },
+    selectedApp: {
+      name: "키텍 앱",
+      process: "fixture",
+      title: "Room table",
+      method: "explicit-selection",
+    },
+    readings: [
+      {
+        room: "101",
+        code,
+        kind: "event",
+        rawLine: "101 " + code,
+        occurredAt: now(),
+        observedAt: now(),
+      },
+    ],
+    ...extra,
+  };
+  return b;
+}
+
+test("physical check requires a recent accepted reading and four actions on the same room", async (t) => {
+  const a = await setup(t),
+    d = await enrolled(a),
+    token = a.store.adminToken;
+  const code = "DOOR_OPEN",
+    b = fieldBatch(d, code);
+  await req(a.agentUrl, "/agent/observations", b, d.token);
+  let r = await req(
+    a.url,
+    "/api/field-checks",
+    {
+      deviceId: d.deviceId,
+      batchId: b.id,
+      room: "101",
+      code,
+      confirmed: false,
+    },
+    token,
+  );
+  assert.equal(r.status, 400);
+  r = await req(
+    a.url,
+    "/api/field-checks",
+    { deviceId: d.deviceId, batchId: b.id, room: "102", code, confirmed: true },
+    token,
+  );
+  assert.equal(r.status, 400);
+  for (const c of [
+    "DOOR_OPEN",
+    "DOOR_CLOSE",
+    "KEY_IN_GUEST",
+    "KEY_OUT_GUEST",
+  ]) {
+    const evidence = fieldBatch(d, c);
+    await req(a.agentUrl, "/agent/observations", evidence, d.token);
+    const saved = await req(
+      a.url,
+      "/api/field-checks",
+      {
+        deviceId: d.deviceId,
+        batchId: evidence.id,
+        room: "101",
+        code: c,
+        confirmed: true,
+      },
+      token,
+    );
+    assert.equal(saved.status, 200, JSON.stringify(saved.data));
+  }
+  assert.equal(
+    a.store.snapshot().devices[0].verification.status,
+    "sample_verified",
+  );
+  assert.equal(a.store.snapshot().devices[0].verification.room, "101");
+  const changed = fieldBatch(d, "DOOR_OPEN", {
+    application: {
+      identity: "b".repeat(64),
+      vendor: "씨리얼",
+      product: "Other fixture",
+      version: "2",
+    },
+  });
+  await req(a.agentUrl, "/agent/observations", changed, d.token);
+  assert.equal(a.store.snapshot().devices[0].verification.status, "pending");
+  assert.throws(
+    () =>
+      a.store.confirmFieldCheck({
+        deviceId: d.deviceId,
+        batchId: b.id,
+        room: "101",
+        code,
+      }),
+    /최근 판독/,
+  );
+});
+
+test("field checks cannot certify stale, uncertain, failed or previous-profile observations", async (t) => {
+  const a = await setup(t),
+    d = await enrolled(a);
+  for (const extra of [
+    { capturedAt: new Date(Date.now() - 180000).toISOString() },
+    { uncertainFields: [{ room: "101", field: "door" }] },
+    { errors: ["READING_CONFLICT: conflict"] },
+    {
+      readings: [
+        {
+          room: "101",
+          code: "DOOR_OPEN",
+          kind: "event",
+          rawLine: "old",
+          occurredAt: new Date(Date.now() - 180000).toISOString(),
+          observedAt: now(),
+        },
+      ],
+    },
+  ]) {
+    const b = fieldBatch(d, "DOOR_OPEN", extra);
+    a.store.ingest(b);
+    assert.throws(() =>
+      a.store.confirmFieldCheck({
+        deviceId: d.deviceId,
+        batchId: b.id,
+        room: "101",
+        code: "DOOR_OPEN",
+      }),
+    );
+  }
+  const b = fieldBatch(d, "DOOR_OPEN");
+  a.store.ingest(b);
+  a.store.run(
+    "INSERT INTO profiles VALUES(?,?,?,?,?,?)",
+    "9",
+    2,
+    JSON.stringify({ ...commonProfile, hotelId: "9", revision: 2 }),
+    "active",
+    now(),
+    "test",
+  );
+  assert.throws(() =>
+    a.store.confirmFieldCheck({
+      deviceId: d.deviceId,
+      batchId: b.id,
+      room: "101",
+      code: "DOOR_OPEN",
+    }),
+  );
+  assert.equal(
+    a.store.snapshot().devices[0].verification.profileCurrent,
+    false,
+  );
+});
+
+test(
+  "hotel room inventory validation retains common parser regressions",
+  { skip: !process.env.RMSLINK_CORE },
+  async (t) => {
+    const a = await setup(t);
+    await a.worker.publish(
+      {
+        ...commonProfile,
+        hotelId: "9",
+        revision: 2,
+        expectedRooms: ["201", "202"],
+      },
+      "test",
+    );
+    assert.deepEqual(a.store.profile("9").expectedRooms, ["201", "202"]);
+    await assert.rejects(() =>
+      a.worker.publish(
+        {
+          ...commonProfile,
+          hotelId: "9",
+          revision: 3,
+          expectedRooms: ["201", "201"],
+        },
+        "test",
+      ),
+    );
+  },
+);

@@ -49,6 +49,7 @@ public static class EventParser
         string room=roomMatch.Groups[1].Value;
         if(profile.RoomMap.TryGetValue(room,out var mapped)) room=mapped;
         if(!Regex.IsMatch(room,@"^[\p{L}\d_-]{1,30}$")){reason="객실번호 범위 오류";return result;}
+        if(profile.ExpectedRooms.Count>0 && !profile.ExpectedRooms.Contains(room)){reason="등록되지 않은 객실번호: "+room;return result;}
         work=work.Remove(roomMatch.Index,roomMatch.Length);
         var text=Regex.Replace(work,@"[\s\p{P}]", "",RegexOptions.None,Timeout);
         // No fuzzy auto-accept: 삽입/제거 and 열림/닫힘 are safety-critical opposites.

@@ -104,21 +104,15 @@ public sealed class OcrService
         {
             var result = await _engine.RecognizeAsync(soft);
 
-            var lines = new List<(double Top, string Text)>();
+            var words = new List<ScreenWord>();
             foreach (var line in result.Lines)
             {
-                double top = double.MaxValue;
-                var words = new List<string>();
                 foreach (var w in line.Words)
                 {
-                    words.Add(w.Text);
-                    if (w.BoundingRect.Top < top) top = w.BoundingRect.Top;
+                    words.Add(new(w.Text,w.BoundingRect.X,w.BoundingRect.Y,w.BoundingRect.Width,w.BoundingRect.Height));
                 }
-                if (words.Count > 0)
-                    lines.Add((top, string.Join(" ", words)));
             }
-            lines.Sort((a, b) => a.Top.CompareTo(b.Top));
-            return lines.Select(l => l.Text).ToList();
+            return OcrRowLayout.Join(words);
         }
         finally
         {

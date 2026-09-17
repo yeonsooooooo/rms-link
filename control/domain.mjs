@@ -21,6 +21,11 @@ export const profileSchema = z
     roomPattern: z.string().min(1).max(200),
     aliases: z.record(z.string().min(2).max(40), z.enum(codes)),
     roomMap: z.record(z.string().max(30), z.string().min(1).max(30)),
+    expectedRooms: z
+      .array(z.string().regex(/^[\p{L}\d_-]{1,30}$/u))
+      .max(500)
+      .default([]),
+    liveClockPattern: z.string().max(200).default(""),
     pollMs: z.number().int().min(1000).max(30000),
     ocrScale: z.number().int().min(1).max(5),
   })
@@ -28,7 +33,8 @@ export const profileSchema = z
   .refine(
     (p) =>
       Object.keys(p.aliases).length <= 100 &&
-      Object.keys(p.roomMap).length <= 500,
+      Object.keys(p.roomMap).length <= 500 &&
+      new Set(p.expectedRooms).size === p.expectedRooms.length,
   );
 export const commonProfile = {
   revision: 1,
@@ -38,6 +44,8 @@ export const commonProfile = {
   roomPattern: "(?<![\\p{L}\\d:])(\\d{3,4})\\s*호?(?![\\d:])",
   aliases: {},
   roomMap: {},
+  expectedRooms: [],
+  liveClockPattern: "",
   pollMs: 1500,
   ocrScale: 3,
 };
@@ -60,7 +68,35 @@ const line = z.object({
 export const observationSchema = z
   .object({
     capturedAt: date,
-    source: z.enum(["none", "ocr", "uia"]),
+    source: z.enum(["none", "ocr", "uia", "hybrid"]),
+    readerVersion: z.string().max(40).optional(),
+    application: z
+      .object({
+        identity: z.string().regex(/^[a-f0-9]{64}$/),
+        vendor: z.string().max(100),
+        product: z.string().max(500),
+        version: z.string().max(100),
+      })
+      .nullable()
+      .optional(),
+    warnings: z.array(z.string().max(1000)).max(30).optional(),
+    uncertainFields: z
+      .array(
+        z.object({ room: z.string().max(30), field: z.enum(["door", "key"]) }),
+      )
+      .max(1000)
+      .optional(),
+    coverage: z
+      .object({
+        mode: z.enum(["events", "snapshot"]),
+        suggestedMode: z.enum(["events", "snapshot"]),
+        expectedRooms: z.array(z.string().max(30)).max(500),
+        observedRooms: z.array(z.string().max(30)).max(500),
+        pending: z.number().int().min(0).max(600),
+        snapshotEvidenceAt: date.nullable(),
+      })
+      .optional(),
+    readings: z.array(eventSchema).max(600).optional(),
     ocrLanguage: z.string().max(50),
     selectedApp: z
       .object({
@@ -131,6 +167,18 @@ export const eventKey = (device, e) =>
 export function diagnose(observation) {
   const errors = observation?.errors ?? [];
   const messages = {
+    READING_CONFLICT: [
+      "판독 결과가 일치하지 않음",
+      "화면 원문과 실제 객실·문·키 상태를 대조해 주세요.",
+    ],
+    ROOM_NOT_ALLOWED: [
+      "등록되지 않은 객실 번호",
+      "실제 객실 목록과 OCR 번호를 대조하고 화면 설정을 확인하세요.",
+    ],
+    LAYOUT_AMBIGUOUS: [
+      "표의 행 또는 상태가 모호함",
+      "한 객실의 번호와 상태가 함께 읽히도록 로그 영역을 좁혀 주세요.",
+    ],
     APP_NOT_SELECTED: [
       "키텍 앱 선택 필요",
       "Windows의 RmsLink 연결 설정에서 키텍 아이콘을 선택해 주세요.",
@@ -200,12 +248,17 @@ export function stateForRoom(room, devices, now = Date.now()) {
     if (!data)
       return { value: null, quality: "unknown", reason: "아직 관측되지 않음" };
     const device = devices.find((d) => d.id === data.deviceId);
+    const uncertain = device?.batch?.observation?.uncertainFields?.some(
+      (x) => x.room === room.room && x.field === name,
+    );
     const fresh =
       device &&
       device.captureFresh !== false &&
       device.online !== false &&
       device.revoked !== 1 &&
       device.status !== "attention" &&
+      device.verification?.profileCurrent !== false &&
+      !uncertain &&
       now - Date.parse(device.last_seen) < 45000 &&
       now - Date.parse(data.at) < (data.kind === "snapshot" ? 60000 : 300000) &&
       device.session_id === data.sessionId;
@@ -222,7 +275,9 @@ export function stateForRoom(room, devices, now = Date.now()) {
         ? data.kind === "snapshot"
           ? "현재 화면 관측"
           : "마지막 이벤트에서 추정"
-        : "연결 또는 상태 근거가 오래됨",
+        : uncertain
+          ? "현재 화면에서 상태 확인 필요"
+          : "연결 또는 상태 근거가 오래됨",
     };
   }
   return { ...room, door: field("door"), key: field("key") };

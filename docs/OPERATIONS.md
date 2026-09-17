@@ -12,7 +12,7 @@
 - 기기 인증키는 Windows DPAPI CurrentUser로 보관합니다. Mac에는 SHA-256 해시만 저장합니다.
 - `update-private.pem`은 Mac 밖으로 배포하지 않습니다. `update-public.pem`만 설치본에 넣습니다. 앱 업데이트의 RSA 서명은 Windows 공인 코드 서명과 별개입니다.
 - 설치본에 들어간 등록권은 7일, 최대 100대입니다. 기기 등록 후에는 만료와 관계없이 기기 키로 연결합니다. 설치 주소와 EXE는 사내 담당자에게 전달합니다. 관리 토큰은 포함하지 않습니다.
-- 일반 사용자 실행은 반드시 hotel_id를 입력합니다. 이전 호텔 outbox는 당시 hotel_id/session_id를 유지합니다.
+- 최초 연결과 호텔 변경 때 hotel_id를 입력하며 저장된 연결은 다음 실행부터 자동 재개합니다. 이전 호텔 outbox는 당시 hotel_id/session_id를 유지합니다.
 
 ## 서버 설치 및 복구
 
@@ -73,3 +73,9 @@ Windows는 RSA 서명된 안내의 만료·호텔 범위·패키지 크기·SHA-
 - 자동 창 탐색이 지원하지 않는 제품명, 캡처 가림, UIA 공급자 비호환, 한국어 OCR 품질은 현장 검증이 필요합니다. 사라진 창이나 읽지 못한 상태를 정상으로 만들지 않습니다.
 
 공식 참고: [Windows 데스크톱 WinRT API](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/winrt-apis-desktop-apps), [Codex 비대화형 실행](https://learn.chatgpt.com/docs/non-interactive-mode), [Tailscale Funnel](https://tailscale.com/docs/reference/tailscale-cli/funnel).
+
+## 0.4로 올릴 때
+
+관리 서버를 먼저 최신 코드와 최신 Core 판독 실행기로 갱신하고 재시작합니다. `/api/state`의 `capabilities`에 `screen-reading-v2`가 있는지 확인한 뒤 Windows 0.4를 배포합니다. 이전 서버는 `hybrid`와 새 진단 필드를 수신할 수 없습니다. 새 UI는 이전 서버에서 새 화면 설정·현장 검증 버튼을 숨깁니다.
+
+기존 build.yml에서 실제 테스트 창의 접근성·OCR 두 프레임·가림 캡처·최소화 복원을 검사합니다. 비공개 설치본을 만든 뒤 기존 installer-check.yml에서 다운로드 주소와 SHA-256을 GitHub Secrets로 전달해 정확히 그 설치 파일의 설치 동작을 검사합니다. 공개 저장소와 공개 산출물에는 실제 호텔 이미지, 등록권, 서버 키, 비공개 설치 EXE를 넣지 않습니다. 두 Windows 검증을 통과한 산출물만 배포합니다.

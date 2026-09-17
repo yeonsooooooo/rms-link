@@ -104,7 +104,7 @@ export async function createApp({
       const chunks = [];
       for await (const chunk of req) {
         n += chunk.length;
-        if (n > 1200000) throw new Error("요청 크기 초과");
+        if (n > 2000000) throw new Error("요청 크기 초과");
         chunks.push(chunk);
       }
       return JSON.parse(Buffer.concat(chunks).toString() || "{}");
@@ -211,6 +211,7 @@ export async function createApp({
             const hotel = url.searchParams.get("hotelId");
             json({
               ...store.snapshot(hotel ? id.parse(hotel) : undefined),
+              capabilities: ["screen-reading-v2"],
               worker: worker.status(),
               access: { publicOrigin: dashboardOrigin, remote },
               installer: existsSync(join(directory, "installer.exe"))
@@ -310,6 +311,21 @@ export async function createApp({
               code: b.code,
             });
             json({ ok: true });
+            broadcast();
+            return;
+          }
+          if (url.pathname === "/api/field-checks" && req.method === "POST") {
+            const b = z
+              .object({
+                deviceId: z.uuid(),
+                batchId: z.uuid(),
+                room: z.string().min(1).max(30),
+                code: z.enum(codes),
+                confirmed: z.literal(true),
+              })
+              .strict()
+              .parse(await body());
+            json(store.confirmFieldCheck(b));
             broadcast();
             return;
           }

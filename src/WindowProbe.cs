@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
 namespace RmsLink;
+public sealed record ApplicationDetails(string Identity,string Vendor,string Product,string Version);
 public sealed record WindowCandidate(long Handle,string Process,string Title,int X,int Y,int W,int H,bool Minimized)
 {
     [System.Text.Json.Serialization.JsonIgnore] public string Executable {get;init;}="";
@@ -24,10 +25,19 @@ public static class WindowProbe
     [DllImport("user32.dll")] static extern bool SwitchDesktop(IntPtr desktop);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd,int command);
+    [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr hwnd,int command);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd,int attribute,out int value,int size);
     [StructLayout(LayoutKind.Sequential)] struct RECT {public int L,T,R,B;}
     public static bool DesktopAvailable(){var d=OpenInputDesktop(0,false,0x0100);if(d==IntPtr.Zero)return false;try{return SwitchDesktop(d);}finally{CloseDesktop(d);}}
     public static void Activate(WindowCandidate w){ShowWindow(new(w.Handle),9);SetForegroundWindow(new(w.Handle));}
+    public static void Restore(WindowCandidate w)=>ShowWindowAsync(new(w.Handle),9);
+    public static ApplicationDetails Describe(WindowCandidate w, string vendor)
+    {
+        var file=new FileInfo(w.Executable);
+        var version=FileVersionInfo.GetVersionInfo(w.Executable);
+        var identity=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(w.Executable.ToUpperInvariant()+"|"+file.Length+"|"+file.LastWriteTimeUtc.Ticks+"|"+version.FileVersion))).ToLowerInvariant();
+        return new(identity,vendor,version.ProductName??"",version.FileVersion??"");
+    }
     public static List<WindowCandidate> All()
     {
         var list=new List<WindowCandidate>();
@@ -87,10 +97,10 @@ public static class WindowProbe
         while(queue.Count>0 && count++<700) {
             var (e,depth)=queue.Dequeue();
             var current=e.Current;
-            if(!current.IsOffscreen && current.ControlType==ControlType.DataItem) {
+            if(!current.IsOffscreen && (current.ControlType==ControlType.DataItem || current.ControlType==ControlType.ListItem)) {
                 var words=new List<string>(); if(!string.IsNullOrWhiteSpace(current.Name))words.Add(current.Name);
                 var child=walker.GetFirstChild(e);int cells=0;
-                while(child!=null && cells++<20){var n=child.Current.Name;if(!string.IsNullOrWhiteSpace(n)&&!words.Contains(n))words.Add(n);child=walker.GetNextSibling(child);}
+                while(child!=null && cells++<20){var n=child.Current.Name;if(string.IsNullOrWhiteSpace(n)&&child.TryGetCurrentPattern(ValuePattern.Pattern,out var value))n=((ValuePattern)value).Current.Value;if(!string.IsNullOrWhiteSpace(n)&&!words.Contains(n))words.Add(n);child=walker.GetNextSibling(child);}
                 if(words.Count>0)list.Add(string.Join(" ",words));
                 continue;
             }

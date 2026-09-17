@@ -73,7 +73,7 @@ internal static class Program
         Logger.Info($"OS={Environment.OSVersion}, .NET={Environment.Version}, exe={Environment.ProcessPath}");
 
         var cfg = AppConfig.Load();
-        bool resume=args.Contains("--resume") && !string.IsNullOrWhiteSpace(cfg.HotelId);
+        bool resume=!args.Contains("--setup") && !string.IsNullOrWhiteSpace(cfg.HotelId) && cfg.SelectedApp!=null;
         if (!resume) {
             using var setup = new SetupForm(cfg);
             if (setup.ShowDialog() != DialogResult.OK) return 0;
