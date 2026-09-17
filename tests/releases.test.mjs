@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+  readFileSync,
+  copyFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Store } from "../control/store.mjs";
@@ -11,16 +18,23 @@ test("automatic release requires current branch success and matching hash, and n
   const dir = mkdtempSync(join(tmpdir(), "rms-release-")),
     fixture = join(dir, "fixture");
   mkdirSync(fixture);
-  const fake = join(dir, "gh");
-  writeFileSync(
-    fake,
-    `#!${process.execPath}\nconst fs=require('node:fs'),p=require('node:path'),a=process.argv.slice(2),c=JSON.parse(fs.readFileSync(p.join(__dirname,'config.json')));if(a[0]==='api')console.log(c.head);else if(a[1]==='list')console.log(JSON.stringify([c.run]));else if(a[1]==='download'){const out=a[a.indexOf('--dir')+1];for(const f of ['RmsLink.zip','validation.json'])fs.copyFileSync(p.join(__dirname,'fixture',f),p.join(out,f));}else process.exit(1);`,
-    { mode: 0o700 },
-  );
-  const old = process.env.RMSLINK_GH;
-  process.env.RMSLINK_GH = fake;
+  const execute = async (args) => {
+    const config = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+    if (args[0] === "api") return config.head;
+    if (args[1] === "list") return JSON.stringify([config.run]);
+    if (args[1] === "download") {
+      const target = args[args.indexOf("--dir") + 1];
+      for (const file of ["RmsLink.zip", "validation.json"])
+        copyFileSync(join(fixture, file), join(target, file));
+      return "";
+    }
+    throw Error("Unexpected GitHub command");
+  };
   const store = new Store(join(dir, "store"));
-  const sync = new ReleaseSync(store, () => {}, { branch: "codex/test" });
+  const sync = new ReleaseSync(store, () => {}, {
+    branch: "codex/test",
+    execute,
+  });
   function fixtureReport({
     id = 1,
     head = "current",
@@ -76,8 +90,6 @@ test("automatic release requires current branch success and matching hash, and n
   } finally {
     await sync.stop();
     store.close();
-    if (old === undefined) delete process.env.RMSLINK_GH;
-    else process.env.RMSLINK_GH = old;
     rmSync(dir, { recursive: true, force: true });
   }
 });

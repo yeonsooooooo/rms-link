@@ -34,8 +34,9 @@ export class ReleaseSync {
   constructor(
     store,
     broadcast,
-    { enabled = true, branch = "codex/rmslink-control" } = {},
+    { enabled = true, branch = "codex/rmslink-control", execute = gh } = {},
   ) {
+    this.execute = execute;
     this.store = store;
     this.broadcast = broadcast;
     this.enabled = enabled;
@@ -55,7 +56,7 @@ export class ReleaseSync {
     const s = this.store;
     try {
       const runs = JSON.parse(
-        await gh([
+        await this.execute([
           "run",
           "list",
           "--repo",
@@ -80,7 +81,7 @@ export class ReleaseSync {
       )
         return;
       const head = (
-        await gh([
+        await this.execute([
           "api",
           `repos/${repository}/commits/${encodeURIComponent(this.branch)}`,
           "--jq",
@@ -92,7 +93,7 @@ export class ReleaseSync {
       if (s.get("SELECT key FROM settings WHERE key=?", key)) return;
       const folder = join(s.dir, "builds", String(run.databaseId));
       mkdirSync(folder, { recursive: true });
-      await gh([
+      await this.execute([
         "run",
         "download",
         String(run.databaseId),

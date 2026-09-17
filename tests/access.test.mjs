@@ -244,3 +244,33 @@ test("live capture schema accepts explicit app and null while preserving error d
     "VendorRooms",
   );
 });
+
+test("candidate installer requires download capability and does not replace published installer", async (t) => {
+  const a = await setup(t);
+  const { mkdirSync } = await import("node:fs");
+  const candidate = "a".repeat(64);
+  mkdirSync(join(a.store.dir, "install-candidates"));
+  writeFileSync(join(a.store.dir, "installer.exe"), "published");
+  writeFileSync(
+    join(a.store.dir, "install-candidates", candidate + ".exe"),
+    "candidate",
+  );
+  const path = "/download/" + a.store.downloadToken + "/RmsLink-Setup.exe";
+  assert.equal(await (await fetch(a.agentUrl + path)).text(), "published");
+  assert.equal(
+    await (await fetch(a.agentUrl + path + "?candidate=" + candidate)).text(),
+    "candidate",
+  );
+  assert.equal(
+    (await fetch(a.agentUrl + path + "?candidate=../installer")).status,
+    400,
+  );
+  assert.equal(
+    (
+      await fetch(
+        a.agentUrl + "/download/wrong/RmsLink-Setup.exe?candidate=" + candidate,
+      )
+    ).status,
+    401,
+  );
+});

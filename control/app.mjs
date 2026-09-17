@@ -39,6 +39,22 @@ export async function createApp({
   // Permit only this configured upstream hostname, never a forwarded value.
   if (dashboardOrigin !== publicOrigin)
     remoteHosts.add(new URL(publicOrigin).hostname);
+  function installerStatus() {
+    if (!existsSync(join(directory, "installer.exe"))) return null;
+    try {
+      const m = JSON.parse(
+        readFileSync(join(directory, "installer.json"), "utf8"),
+      );
+      return {
+        available: true,
+        version: /^\d+\.\d+\.\d+$/.test(m.version) ? m.version : null,
+        windowsVerified: m.installerExecutedOnWindows === true,
+        sha256: /^[a-f0-9]{64}$/.test(m.sha256) ? m.sha256 : null,
+      };
+    } catch {
+      return { available: true, version: null, windowsVerified: false };
+    }
+  }
   let ownOrigin;
   const broadcast = () => {
     for (const res of subscribers)
@@ -214,9 +230,7 @@ export async function createApp({
               capabilities: ["screen-reading-v2", "reading-methods-v1"],
               worker: worker.status(),
               access: { publicOrigin: dashboardOrigin, remote },
-              installer: existsSync(join(directory, "installer.exe"))
-                ? { available: true }
-                : null,
+              installer: installerStatus(),
             });
             return;
           }
@@ -428,7 +442,12 @@ export async function createApp({
         url.pathname === `/download/${store.downloadToken}/RmsLink-Setup.exe` &&
         req.method === "GET"
       ) {
-        const f = join(directory, "installer.exe");
+        const candidate = url.searchParams.get("candidate");
+        if (candidate !== null && !/^[a-f0-9]{64}$/.test(candidate))
+          return json({ error: "검증 파일 정보 오류" }, 400);
+        const f = candidate
+          ? join(directory, "install-candidates", candidate + ".exe")
+          : join(directory, "installer.exe");
         if (!existsSync(f)) {
           json({ error: "없음" }, 404);
           return;
