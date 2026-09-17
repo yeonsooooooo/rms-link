@@ -23,3 +23,8 @@ jobs:
           $shell = New-Object -ComObject WScript.Shell
           $shortcut = $shell.CreateShortcut($path)
           @{expected=$target; native=$native; scriptTarget=$shortcut.TargetPath; scriptArguments=$shortcut.Arguments; scriptFile=$shortcut.FullName; exists=(Test-Path $path); envLocal=$env:LOCALAPPDATA; nativeLocal=[Environment]::GetFolderPath('LocalApplicationData'); desktop=[Environment]::GetFolderPath('Desktop'); desktopDirectory=[Environment]::GetFolderPath('DesktopDirectory')} | ConvertTo-Json -Depth 4
+          $copyPath = Join-Path $pwd 'probe-ascii.lnk'
+          Copy-Item -LiteralPath $path -Destination $copyPath
+          $copy = $shell.CreateShortcut($copyPath)
+          if ($copy.TargetPath -ne $target -or $copy.Arguments -ne '--setup') { throw 'ASCII inspection copy mismatch' }
+          Write-Output 'Identical ASCII inspection copy preserves the target and arguments.'
