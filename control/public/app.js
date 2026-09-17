@@ -73,12 +73,35 @@ const statusNames = {
 const badge = (text, color = "") =>
   `<span class="badge ${color}">${escape(text)}</span>`;
 async function api(path, body) {
-  const r = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
-    headers: { "Content-Type": "application/json", "X-Rmslink-Client": "1" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+  const canRetry = body === undefined || path === "/api/bootstrap";
+  let r;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      r = await fetch(path, {
+        method: body === undefined ? "GET" : "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Rmslink-Client": "1",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch {
+      if (!canRetry || attempt > 0)
+        throw Error("서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      continue;
+    }
+    if (canRetry && attempt === 0 && [502, 503, 504].includes(r.status)) {
+      await r.body?.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      continue;
+    }
+    break;
+  }
+  const data = await r.json().catch(() => {
+    throw Error("서버 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요.");
   });
-  const data = await r.json();
   if (!r.ok) {
     if (r.status === 401 && path !== "/api/login") {
       loginRequired = true;

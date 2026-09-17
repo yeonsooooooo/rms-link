@@ -80,6 +80,15 @@ try {
     "releases",
   ])
     assert.deepEqual(remote[key], local[key], `Shared ${key}`);
+  assert.deepEqual(remote.installer, local.installer, "Shared installer");
+  assert.deepEqual(
+    remote.capabilities,
+    local.capabilities,
+    "Shared capabilities",
+  );
+  result.installerVersion = remote.installer?.version ?? null;
+  result.installerWindowsVerified = remote.installer?.windowsVerified === true;
+  result.readingMethods = remote.capabilities.includes("reading-methods-v1");
   assert.equal(remote.access.remote, true);
   assert.equal(remote.access.publicOrigin, origin);
   assert.equal((await api("/api/access")).status, 403);

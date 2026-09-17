@@ -20,8 +20,25 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 try {
+  let bootstrapCalls = 0;
+  await page.route("**/api/bootstrap", async (route) => {
+    bootstrapCalls++;
+    if (bootstrapCalls === 1)
+      return route.fulfill({
+        status: 502,
+        contentType: "text/plain",
+        body: "Upstream temporarily unavailable",
+      });
+    return route.continue();
+  });
   await page.goto(app.url);
   await page.getByText("첫 호텔의 연결을 기다리고 있습니다").waitFor();
+  assert.equal(
+    bootstrapCalls,
+    2,
+    "Initial dashboard recovers from a transient proxy failure",
+  );
+  await page.unroute("**/api/bootstrap");
   await page.screenshot({
     path: join(artifacts, "dashboard-empty.png"),
     fullPage: true,
@@ -156,10 +173,26 @@ try {
       },
     ],
   });
+  let stateCalls = 0;
+  await page.route("**/api/state", async (route) => {
+    stateCalls++;
+    if (stateCalls === 1)
+      return route.fulfill({
+        status: 502,
+        contentType: "text/plain",
+        body: "Upstream temporarily unavailable",
+      });
+    return route.continue();
+  });
   await page.getByRole("button", { name: "↻ 새로고침" }).click();
   await page
     .getByText("테스트 PC · 현장 시뮬레이션", { exact: true })
     .waitFor();
+  assert(
+    stateCalls >= 2,
+    "Dashboard state recovers from a transient proxy failure",
+  );
+  await page.unroute("**/api/state");
   await page.screenshot({
     path: join(artifacts, "dashboard-test-data.png"),
     fullPage: true,
