@@ -93,7 +93,7 @@ foreach(var mode in new[]{"healthy","crash","timeout","throw"}) {
         Process LaunchFixture(string version) {
             if(version=="0.4.1"&&mode=="throw")throw new Exception("Cannot execute new binary");
             var psi=new ProcessStartInfo(Environment.ProcessPath){UseShellExecute=false};
-            if(Path.GetFileNameWithoutExtension(Environment.ProcessPath)=="dotnet")psi.ArgumentList.Add(typeof(Updater).Assembly.Location);
+            if(Path.GetFileNameWithoutExtension(Environment.ProcessPath)=="dotnet")psi.ArgumentList.Add(Environment.GetCommandLineArgs()[0]);
             psi.ArgumentList.Add("--update-fixture");psi.ArgumentList.Add(Path.Combine(folder,"healthy-"+version));psi.ArgumentList.Add(version=="0.4.0"?"healthy":mode);
             var child=Process.Start(psi);processes.Add(child.Id);return child;
         }
