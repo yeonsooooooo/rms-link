@@ -16,7 +16,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $uri = [Uri]$env:RMSLINK_INSTALLER_URL
           if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'ys-macmini.tail984bfd.ts.net' -or $uri.Port -ne 8443) { throw 'Unexpected installer origin' }
-          Invoke-WebRequest -Uri $uri -OutFile RmsLink-Setup.exe
+          $ProgressPreference = 'SilentlyContinue'
+          curl.exe --fail --location --retry 2 --max-time 1200 --silent --show-error --output RmsLink-Setup.exe $uri.AbsoluteUri
+          if ($LASTEXITCODE -ne 0) { throw 'Installer download failed' }
           $sha = (Get-FileHash RmsLink-Setup.exe -Algorithm SHA256).Hash.ToLower()
           if ($sha -ne $env:RMSLINK_INSTALLER_SHA256) { throw 'Installer digest mismatch' }
           $report = "$pwd/installer-verification.json"
@@ -31,6 +33,7 @@ jobs:
           $launcher = Join-Path $root 'RmsLinkLauncher.exe'
           $shell = New-Object -ComObject WScript.Shell
           $shortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'RmsLink 연결 설정.lnk'))
+          @{ target=$shortcut.TargetPath; arguments=$shortcut.Arguments; expected=$launcher; shortcutExists=(Test-Path $shortcut.FullName) } | ConvertTo-Json
           if ($shortcut.TargetPath -ne $launcher -or $shortcut.Arguments -ne '--setup') { throw 'Setup shortcut does not use current-version launcher' }
           $startup = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run').RmsLink
           if ($startup -ne ('"' + $launcher + '"')) { throw 'Automatic startup does not use launcher' }
@@ -43,6 +46,7 @@ jobs:
           if (-not $runtimeResult.passed -or $runtimeResult.version -ne $version -or $null -ne $runtimeResult.captureTests) { throw 'Installed update preflight failed' }
           @{ passed=$true; version=$version; launcherShortcut=$true; automaticStartup=$true; installedRuntime=$true; installerSha256=$sha; windows=[Environment]::OSVersion.VersionString; installed=$result.installed; dashboardShortcut=$result.dashboardShortcut; connectionShortcut=$result.connectionShortcut; customIcon=$result.customIcon; installerExecuted=$true; guiInstallPerformed=$false; physicalKeytechVerified=$false; checkedAt=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content $report -Encoding utf8
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: rmslink-installer-verification
           path: installer-verification.json

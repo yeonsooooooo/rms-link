@@ -270,7 +270,10 @@ export async function createApp({
               "Content-Disposition": 'attachment; filename="RmsLink-Setup.exe"',
               "Content-Length": statSync(f).size,
             });
-            createReadStream(f).pipe(res);
+            const stream = createReadStream(f);
+            res.once("close", () => stream.destroy());
+            stream.once("error", () => res.destroy());
+            stream.pipe(res);
             return;
           }
           if (url.pathname === "/api/installer-link" && req.method === "GET") {
@@ -457,7 +460,10 @@ export async function createApp({
           "Content-Disposition": 'attachment; filename="RmsLink-Setup.exe"',
           "Content-Length": statSync(f).size,
         });
-        createReadStream(f).pipe(res);
+        const stream = createReadStream(f);
+        res.once("close", () => stream.destroy());
+        stream.once("error", () => res.destroy());
+        stream.pipe(res);
         return;
       }
       if (url.pathname === "/agent/enroll" && req.method === "POST") {
@@ -632,7 +638,10 @@ export async function createApp({
           "Content-Type": "application/zip",
           "Content-Length": statSync(f).size,
         });
-        createReadStream(f).pipe(res);
+        const stream = createReadStream(f);
+        res.once("close", () => stream.destroy());
+        stream.once("error", () => res.destroy());
+        stream.pipe(res);
         return;
       }
       json({ error: "없음" }, 404);
