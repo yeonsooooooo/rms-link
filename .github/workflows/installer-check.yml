@@ -31,20 +31,35 @@ jobs:
           $version = (Get-Content (Join-Path $root 'current.txt')).Trim()
           if ($version -ne $result.version) { throw 'Installed version pointer mismatch' }
           $launcher = Join-Path $root 'RmsLinkLauncher.exe'
+          $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'RmsLink 연결 설정.lnk'
+          # WScript.Shell replaces Korean filenames with ? on this English runner.
+          # Inspect an identical ASCII-named copy and launch the original Unicode shortcut below.
+          $inspectionPath = Join-Path $pwd 'verified-setup.lnk'
+          Copy-Item -LiteralPath $shortcutPath -Destination $inspectionPath
+          if ((Get-FileHash -LiteralPath $shortcutPath).Hash -ne (Get-FileHash $inspectionPath).Hash) { throw 'Shortcut inspection copy changed' }
           $shell = New-Object -ComObject WScript.Shell
-          $shortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'RmsLink 연결 설정.lnk'))
-          @{ target=$shortcut.TargetPath; arguments=$shortcut.Arguments; expected=$launcher; shortcutExists=(Test-Path $shortcut.FullName) } | ConvertTo-Json
+          $shortcut = $shell.CreateShortcut($inspectionPath)
           if ($shortcut.TargetPath -ne $launcher -or $shortcut.Arguments -ne '--setup') { throw 'Setup shortcut does not use current-version launcher' }
           $startup = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run').RmsLink
           if ($startup -ne ('"' + $launcher + '"')) { throw 'Automatic startup does not use launcher' }
           $app = Join-Path $root "versions/$version/RmsLink.exe"
+          Start-Process -FilePath $shortcutPath
+          $setupProcess = $null
+          for ($i=0; $i -lt 60; $i++) {
+            $setupProcess = Get-Process RmsLink -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -and $_.Path -eq $app.Replace('/','\') } | Select-Object -First 1
+            if ($setupProcess) { break }
+            Start-Sleep -Milliseconds 250
+          }
+          if (-not $setupProcess) { throw 'Original Korean setup shortcut did not open the installed app' }
+          $setupProcess.CloseMainWindow() | Out-Null
+          if (-not $setupProcess.WaitForExit(5000)) { $setupProcess.Kill(); $setupProcess.WaitForExit() }
           $runtimeReport = Join-Path $pwd 'installed-runtime.json'
           $runtime = Start-Process -FilePath $app -ArgumentList @('--runtime-test', $runtimeReport) -PassThru
           if (-not $runtime.WaitForExit(45000)) { Stop-Process -Id $runtime.Id; throw 'Installed runtime timed out' }
           if ($runtime.ExitCode -ne 0 -or -not (Test-Path $runtimeReport)) { throw 'Installed runtime failed' }
           $runtimeResult = Get-Content $runtimeReport | ConvertFrom-Json
           if (-not $runtimeResult.passed -or $runtimeResult.version -ne $version -or $null -ne $runtimeResult.captureTests) { throw 'Installed update preflight failed' }
-          @{ passed=$true; version=$version; launcherShortcut=$true; automaticStartup=$true; installedRuntime=$true; installerSha256=$sha; windows=[Environment]::OSVersion.VersionString; installed=$result.installed; dashboardShortcut=$result.dashboardShortcut; connectionShortcut=$result.connectionShortcut; customIcon=$result.customIcon; installerExecuted=$true; guiInstallPerformed=$false; physicalKeytechVerified=$false; checkedAt=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content $report -Encoding utf8
+          @{ passed=$true; version=$version; launcherShortcut=$true; setupShortcutLaunch=$true; automaticStartup=$true; installedRuntime=$true; installerSha256=$sha; windows=[Environment]::OSVersion.VersionString; installed=$result.installed; dashboardShortcut=$result.dashboardShortcut; connectionShortcut=$result.connectionShortcut; customIcon=$result.customIcon; installerExecuted=$true; guiInstallPerformed=$false; physicalKeytechVerified=$false; checkedAt=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content $report -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
