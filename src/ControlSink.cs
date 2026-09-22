@@ -57,7 +57,9 @@ public sealed class ControlSink:IDisposable
     }
     async Task Heartbeat() {
         networkStage="HEARTBEAT";
-        using var r=await http.PostAsJsonAsync("agent/heartbeat",new {deviceId=cfg.DeviceId,hotelId=cfg.HotelId,sessionId,version=Updater.Version,profileRevision=ProfileRevision,pending=PendingCount,updateStatus=UpdateStatus},JsonDefaults.Options,cts.Token);
+        var rejected=Path.Combine(dataDirectory,"rejected");
+        int rejectedCount=Directory.Exists(rejected)?Directory.GetFiles(rejected,"*.json").Length:0;
+        using var r=await http.PostAsJsonAsync("agent/heartbeat",new {deviceId=cfg.DeviceId,hotelId=cfg.HotelId,sessionId,version=Updater.Version,profileRevision=ProfileRevision,pending=PendingCount,updateStatus=UpdateStatus+(rejectedCount>0?" · 거부된 전송 "+rejectedCount+"건 보존":"")},JsonDefaults.Options,cts.Token);
         await AgentConnection.Ensure(r,networkStage,cts.Token);await AgentConnection.RequireOk(r,networkStage,cts.Token);
         ConnectionReport.Set(networkStage,"passed","호텔 연결 보고 수신 확인");
     }

@@ -10,7 +10,7 @@ static class Program
     static StageReport Report = new(Path.Combine(Root, "installation-status.json"));
     static Label progress;
     static string previousMessage;
-    static void Step(string code, string message) { if(previousMessage!=null)Report.Set(Report.Stage,"passed",previousMessage);previousMessage=message;Report.Set(code, "running", message); if (progress != null) { progress.Text = message; progress.Refresh(); Application.DoEvents(); } }
+    static void Step(string code, string message) { if(previousMessage!=null && Report.Status=="running")Report.Set(Report.Stage,"passed",previousMessage);previousMessage=message;Report.Set(code, "running", message); if (progress != null) { progress.Text = message; progress.Refresh(); Application.DoEvents(); } }
     [STAThread] static int Main(string[] args)
     {
         string testReport = args.Length == 2 && (args[0] == "--install-test" || args[0] == "--verify-payload") ? args[1] : null;
@@ -89,6 +89,7 @@ static class Program
                 } finally { try { Directory.Delete(staging,true); } catch { } }
                 Step("APP_START", "6/6 연결 설정 창을 엽니다.");
                 LaunchChecked();
+                Report.Set("APP_START","passed","연결 설정 창 시작 확인");
                 Report.Set("COMPLETE","passed","설치 및 연결 설정 창 실행 완료. 설정 창에서 서버 연결을 확인하세요.");
                 return 0;
             }

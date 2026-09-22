@@ -9,12 +9,13 @@ public sealed class StageReport
     readonly Dictionary<string, object> steps = new();
     readonly string runId = Guid.NewGuid().ToString();
     public string Stage { get; private set; } = "START";
+    public string Status { get; private set; } = "waiting";
     public StageReport(string path) { this.path = path; }
     public void Set(string stage, string status, string message)
     {
         lock (gate)
         {
-            Stage = stage;
+            Stage = stage; Status = status;
             steps[stage] = new { stage, status, message, at = DateTimeOffset.UtcNow };
             var text = JsonSerializer.Serialize(new { runId, stage, status, at = DateTimeOffset.UtcNow, steps = steps.Values }, new JsonSerializerOptions { WriteIndented = true });
             try { Write(path, text); }
