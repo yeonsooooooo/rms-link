@@ -8,7 +8,7 @@ public sealed class SetupForm:Form
     bool picked, checking;
     public SetupForm(AppConfig config)
     {
-        cfg=config;Text="RmsLink · 호텔과 키텍 연결";StartPosition=FormStartPosition.CenterScreen;ClientSize=new(640,690);Font=new("맑은 고딕",10);FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;
+        cfg=config;AutoScroll=true;Text="RmsLink · 호텔과 키텍 연결";StartPosition=FormStartPosition.CenterScreen;ClientSize=new(640,690);Font=new("맑은 고딕",10);FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;
         var intro=new Label{Text="설치 다음 단계: 호텔·키텍·서버 연결 확인",Location=new(24,20),AutoSize=true,Font=new("맑은 고딕",13,FontStyle.Bold)};
         var hint=new Label{Text="1. 실제 호텔 ID를 입력하세요.",Location=new(24,63),AutoSize=true};
         hotel=new(){Text=cfg.HotelId,PlaceholderText="예: 9 또는 10",Location=new(24,90),Width=590};
@@ -46,6 +46,16 @@ public sealed class SetupForm:Form
         };
         FormClosing+=(_,e)=>{if(checking)e.Cancel=true;};
         Controls.AddRange(new Control[]{intro,hint,hotel,pick,target,share,startup,auto,restore,codeLabel,registration,status,logs,ok});AcceptButton=ok;
+    }
+    protected override void OnShown(EventArgs e)
+    {
+        // Hotel PCs often use small displays or 125-150% scaling. Keep the final button reachable.
+        var area=Screen.FromControl(this).WorkingArea;
+        if(Width>area.Width-24||Height>area.Height-24) {
+            Size=new(Math.Min(Width,area.Width-24),Math.Min(Height,area.Height-24));
+            Location=new(area.X+(area.Width-Width)/2,area.Y+(area.Height-Height)/2);
+        }
+        base.OnShown(e);
     }
     void UpdateTarget()=>target.Text=cfg.SelectedApp==null?"아직 키텍 앱을 선택하지 않았습니다.":"선택됨: "+cfg.SelectedApp.Title+"\n"+Path.GetFileName(cfg.SelectedApp.Executable);
 }

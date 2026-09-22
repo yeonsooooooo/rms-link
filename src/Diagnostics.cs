@@ -28,7 +28,14 @@ public static class Diagnostics
     }
     static object NativeCaptureTest(string folder)
     {
-        using(var setup=new SetupForm(new())){setup.CreateControl();}
+        using(var setup=new SetupForm(new())){
+            setup.ClientSize=new(640,400);setup.Show();Application.DoEvents();
+            if(!setup.VerticalScroll.Visible)throw new Exception("Small-display setup must scroll to the connection button");
+            var connect=setup.Controls.OfType<Button>().Single(b=>b.Text.StartsWith("3."));
+            setup.ScrollControlIntoView(connect);Application.DoEvents();
+            if(!setup.ClientRectangle.Contains(connect.Bounds))throw new Exception("Connection button is unreachable on a small display");
+            setup.Close();
+        }
         using(var picker=new AppPickerForm()){picker.CreateControl();}
         using var fixture=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath,"--capture-fixture"){UseShellExecute=false});
         try {
