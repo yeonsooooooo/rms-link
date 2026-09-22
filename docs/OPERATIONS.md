@@ -6,7 +6,7 @@
 
 - 내부 관제: http://127.0.0.1:18760
 - 외부 관제: https://rms-link.vercel.app (Vercel 프로젝트 `rms-link`)
-- Windows 전용 HTTPS: https://ys-macmini.tail984bfd.ts.net:8443
+- Windows 수신·직접 관제 HTTPS: https://ys-macmini.tail984bfd.ts.net:8443
 - 외부 수신기는 `127.0.0.1:18761`에만 바인딩하며 Tailscale Funnel 8443을 사용합니다. 기존 443 게이트웨이를 변경하지 않습니다.
 - 데이터: `~/Library/Application Support/RmsLink` (0700)
 - 기기 인증키는 Windows DPAPI CurrentUser로 보관합니다. Mac에는 SHA-256 해시만 저장합니다.
@@ -18,7 +18,9 @@
 
 ### Vercel 외부 주소
 
-`deploy/vercel`만 배포합니다. Vercel의 외부 rewrite가 기존 HTTPS 서버로 요청을 전달하므로 SQLite 데이터, 수집, 분석 작업은 계속 운영 서버에서 실행됩니다. 서버·중계·인터넷 연결이 필요합니다. 운영 데이터, 접속 코드, 개인키, Windows 설치 파일은 Vercel에 업로드하지 않습니다. 구성 방식은 [Vercel 외부 rewrite 문서](https://vercel.com/docs/routing/rewrites)를 따릅니다.
+`deploy/vercel`만 배포합니다. 0.4.2 검증에서 Vercel 외부 rewrite의 간헐적 502를 확인하여 첫 화면 `/`을 기존 공개 HTTPS 관제로 307 이동하도록 변경했습니다. 브라우저 주소가 `ys-macmini.tail984bfd.ts.net:8443`으로 바뀌며 같은 접속 코드를 사용합니다. 이 주소는 외부 Windows 검증에서도 접속한 공개 Funnel 주소입니다. 기존 도메인 쿠키는 전달되지 않으므로 최초 이동 후 다시 로그인할 수 있습니다. 기존 하위 경로의 rewrite는 유지합니다.
+
+SQLite 데이터, 수집, 분석 작업은 계속 운영 서버에서 실행되므로 서버·중계·인터넷 연결이 필요합니다. 운영 데이터, 접속 코드, 개인키, Windows 설치 파일은 Vercel에 업로드하지 않습니다. 구성은 [Vercel redirect 문서](https://vercel.com/docs/project-configuration/vercel-json#redirects)와 [외부 rewrite 문서](https://vercel.com/docs/routing/rewrites)를 따릅니다.
 
 ```sh
 cd /Users/ys/dev/rms-link/deploy/vercel
@@ -33,7 +35,7 @@ vercel deploy --prod --yes
 - `/api/installer`는 로그인 확인 후 다운로드 서버로 이동합니다. 약 290MiB 설치 파일의 전송은 Vercel을 거치지 않습니다.
 - 도메인을 바꿀 때는 서버의 `RMSLINK_DASHBOARD_ORIGIN`과 배포 별칭을 함께 변경하고 서버를 다시 시작한 뒤 `node scripts/desktop-mac.mjs`로 접속 안내를 갱신합니다. 기존 접속 코드는 유지되고 로그인 세션만 만료됩니다.
 - 장애 확인: 정식 주소의 `/health`, 로그인 전 `/api/state`의 401, 로그인 후 내부/외부 데이터 일치, `/api/events`의 `ready`/`change`, 매뉴얼과 `.url` 다운로드를 점검합니다.
-- 운영 서버의 프로젝트 폴더에서 `node scripts/verify-vercel.mjs`를 실행하면 로그인·캐시 방지·동일 데이터·실시간 연결·다운로드·로그아웃을 검사하고 `artifacts/vercel-verification.json`에 결과를 저장합니다. 접속 코드는 출력하지 않습니다.
+- 운영 서버의 프로젝트 폴더에서 `node scripts/verify-vercel.mjs`를 실행하면 진입 주소 이동·로그인·캐시 방지·동일 데이터·새 등록 코드 발급·독립 진단 다운로드·실시간 연결·설치 파일 다운로드·로그아웃을 검사하고 `artifacts/vercel-verification.json`에 결과를 저장합니다. 검사에 사용한 미사용 등록권은 삭제하며 접속 코드는 출력하지 않습니다. GET의 502/503/504 재시도 여부도 기록합니다.
 
 ### 운영 서버
 
@@ -43,7 +45,7 @@ vercel deploy --prod --yes
 launchctl print gui/$(id -u)/kr.co.rosegold.rmslink-control
 ```
 
-서버 코드: `/Users/ys/dev/rms-link`의 `codex/rmslink-control` 브랜치. Windows 자동 배포는 이 브랜치의 `build.yml` 성공 실행을 추적합니다. 브랜치를 바꾸면 `RMSLINK_RELEASE_BRANCH`도 변경하세요.
+서버 코드: `/Users/ys/dev/rms-link`. 0.4.2는 `codex/install-recovery`에서 Windows 검증을 거쳐 수동 게시했습니다. 기존 자동 배포 설정은 `codex/rmslink-control`의 `build.yml` 성공 실행을 추적합니다. 검증용 브랜치를 push하는 것만으로 자동 게시되지 않으며, 향후 추적 브랜치를 바꾸려면 `RMSLINK_RELEASE_BRANCH`도 변경해야 합니다.
 
 ## 계속 개선하기
 
@@ -90,6 +92,6 @@ Windows는 RSA 서명된 안내의 만료·호텔 범위·패키지 크기·SHA-
 
 Windows 빌드 검증만으로 설치 파일 배포가 끝난 것은 아닙니다. `installer.json`과 `/api/state`의 배포 버전을 확인하고, 비공개 설치 파일을 만든 뒤 실제 Windows 설치 검증까지 완료해야 합니다. 추적 브랜치와 다른 검증용 브랜치를 push하는 것만으로 자동 업데이트가 배포되지 않습니다.
 
-설치 검증 전 후보 파일은 운영 데이터 폴더의 `install-candidates/<SHA-256>.exe`에 둡니다. 기존 비공개 다운로드 주소에 `?candidate=<SHA-256>`을 붙인 주소와 해시를 GitHub Secrets에 저장하면, 현재 고객용 설치 파일을 바꾸지 않고 정확한 후보를 Windows에서 검사할 수 있습니다. 통과 후 기존 파일을 백업하고 `installer.exe`와 검증 결과가 포함된 `installer.json`을 교체합니다. 고객용 다운로드는 후보 쿼리를 사용하지 않습니다.
+설치 검증 전 후보 파일은 운영 데이터 폴더의 `install-candidates/<SHA-256>.exe`에 둡니다. GitHub에 이미 설정한 비공개 다운로드 URL을 그대로 사용하고 `installer-check.yml`의 `candidate_sha256` 입력에 공개 가능한 SHA-256만 전달합니다. 워크플로가 기존 URL에 후보 쿼리를 붙여 현재 고객용 파일을 바꾸지 않고 정확한 후보를 Windows에서 검사합니다. 통과 후 기존 파일을 백업하고 `installer.exe`와 검증 결과가 포함된 `installer.json`을 교체합니다. 고객용 다운로드는 후보 쿼리를 사용하지 않습니다.
 
 영문 Windows의 `WScript.Shell`은 한글 바로가기 경로를 잘못 해석할 수 있습니다. CI에서는 원본과 해시가 같은 영문 이름의 복사본으로 대상·인수를 검사하고, 원래 한글 바로가기를 실제로 실행하여 설치된 설정 창이 열리는지도 확인합니다. 제품의 바로가기 처리는 Unicode를 사용하는 Windows API로 수행합니다.
