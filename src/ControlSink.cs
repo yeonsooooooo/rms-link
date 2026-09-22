@@ -1,21 +1,30 @@
 using System.Net.Http.Json;
+using RmsLink.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 namespace RmsLink;
 public sealed class ControlSink:IDisposable
 {
+    public readonly StageReport ConnectionReport;
+    readonly string dataDirectory;
+    readonly SemaphoreSlim connectionGate=new(1,1);
+    bool enrolled;
+    string networkStage="SERVER";
     readonly AppConfig cfg; readonly CancellationTokenSource cts=new(); Task loop,updateTask;
     readonly string queueDir; readonly string sessionId=Guid.NewGuid().ToString();
-    readonly HttpClient http=new(new HttpClientHandler { AllowAutoRedirect=false }){Timeout=TimeSpan.FromSeconds(25)};
+    readonly HttpClient http;
     public long SentCount; public string LastError=""; public DateTime LastSentAt=DateTime.MinValue;
     public string UpdateStatus="업데이트 대기"; public bool ManualUpdateRequested;
     public Action ExitForUpdate; public Action<AdapterProfile> ProfileChanged;
     public int ProfileRevision=1;
     public int PendingCount=>Directory.GetFiles(queueDir,"*.json").Length;
-    public ControlSink(AppConfig config)
+    public ControlSink(AppConfig config, HttpMessageHandler handler=null, string storageDirectory=null)
     {
-        cfg=config;UpdateStatus=cfg.AutoUpdate?"자동 업데이트 확인 대기":"자동 업데이트 꺼짐";queueDir=Path.Combine(AppConfig.Dir,"outbox");Directory.CreateDirectory(queueDir);
+        dataDirectory=storageDirectory??AppConfig.Dir;
+        ConnectionReport=new(Path.Combine(dataDirectory,"connection-status.json"));
+        http=new(handler??new HttpClientHandler{AllowAutoRedirect=false}){Timeout=TimeSpan.FromSeconds(25)};
+        cfg=config;UpdateStatus=cfg.AutoUpdate?"자동 업데이트 확인 대기":"자동 업데이트 꺼짐";queueDir=Path.Combine(dataDirectory,"outbox");Directory.CreateDirectory(queueDir);
         if(string.IsNullOrEmpty(cfg.DeviceSecret))cfg.SetToken(Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant());
         http.BaseAddress=new Uri(cfg.ServerUrl.TrimEnd('/')+"/");http.DefaultRequestHeaders.Authorization=new("Bearer",cfg.GetToken());
     }
@@ -28,25 +37,49 @@ public sealed class ControlSink:IDisposable
         var bytes=ProtectedData.Protect(Encoding.UTF8.GetBytes(JsonDefaults.Serialize(batch)),null,DataProtectionScope.CurrentUser);
         File.WriteAllBytes(name+".tmp",bytes);File.Move(name+".tmp",name);
     }
-    public async Task<string> CheckConnection(){using var r=await http.GetAsync("health",cts.Token);r.EnsureSuccessStatusCode();return "맥 미니 HTTPS 연결 정상";}
+    public async Task<string> CheckConnection()
+    {
+        await connectionGate.WaitAsync(cts.Token);
+        try {
+            networkStage="SERVER"; ConnectionReport.Set(networkStage,"running","HTTPS 서버 확인 중");
+            await AgentConnection.Health(http,cts.Token); ConnectionReport.Set(networkStage,"passed","RmsLink HTTPS 응답 확인");
+            await Enroll(); await Heartbeat();
+            return "서버 응답 · 기기 등록 · 호텔 연결 확인 완료. 화면 판독과 실제 문·키 대조를 계속하세요.";
+        } catch(Exception ex) {
+            var message=AgentConnection.Describe(ex,networkStage);ConnectionReport.Set(networkStage,"failed",message);
+            throw new IOException(message,ex);
+        } finally { connectionGate.Release(); }
+    }
+    async Task Enroll() {
+        networkStage="ENROLL";ConnectionReport.Set(networkStage,"running","기기 등록 확인 중");
+        await AgentConnection.Enroll(http,cfg.DeviceId,cfg.EnrollmentCode,Environment.MachineName,cts.Token);
+        enrolled=true;ConnectionReport.Set(networkStage,"passed","기기 등록 확인");
+    }
+    async Task Heartbeat() {
+        networkStage="HEARTBEAT";
+        using var r=await http.PostAsJsonAsync("agent/heartbeat",new {deviceId=cfg.DeviceId,hotelId=cfg.HotelId,sessionId,version=Updater.Version,profileRevision=ProfileRevision,pending=PendingCount,updateStatus=UpdateStatus},JsonDefaults.Options,cts.Token);
+        await AgentConnection.Ensure(r,networkStage,cts.Token);await AgentConnection.RequireOk(r,networkStage,cts.Token);
+        ConnectionReport.Set(networkStage,"passed","호텔 연결 보고 수신 확인");
+    }
     async Task Loop()
     {
-        bool enrolled=false; DateTime updateDue=DateTime.MinValue;int failures=0;
+        DateTime updateDue=DateTime.MinValue;int failures=0;
         while(!cts.IsCancellationRequested)try {
-            string rejected=Path.Combine(AppConfig.Dir,"rejected");Directory.CreateDirectory(rejected);
-            if(!enrolled){using var r=await http.PostAsJsonAsync("agent/enroll",new {deviceId=cfg.DeviceId,enrollmentCode=cfg.EnrollmentCode,machine=Environment.MachineName},JsonDefaults.Options,cts.Token);r.EnsureSuccessStatusCode();enrolled=true;}
-            // Keep live heartbeat flowing even when old event batches need replay.
-            using(var r=await http.PostAsJsonAsync("agent/heartbeat",new {deviceId=cfg.DeviceId,hotelId=cfg.HotelId,sessionId,version=Updater.Version,profileRevision=ProfileRevision,pending=PendingCount,updateStatus=UpdateStatus+(Directory.GetFiles(rejected,"*.json").Length>0?" · 거부된 전송 "+Directory.GetFiles(rejected,"*.json").Length+"건 보존":"")},JsonDefaults.Options,cts.Token)) r.EnsureSuccessStatusCode();
+            string rejected=Path.Combine(dataDirectory,"rejected");Directory.CreateDirectory(rejected);
+            await connectionGate.WaitAsync(cts.Token);
+            try { if(!enrolled) await Enroll(); await Heartbeat(); }
+            finally { connectionGate.Release(); }
             foreach(var file in Directory.GetFiles(queueDir,"*.json").OrderBy(x=>x).Take(40)) {
                 var data=ProtectedData.Unprotect(File.ReadAllBytes(file),null,DataProtectionScope.CurrentUser);
                 using var content=new ByteArrayContent(data);content.Headers.ContentType=new("application/json");
+                networkStage="OBSERVATIONS";
                 using var r=await http.PostAsync("agent/observations",content,cts.Token);
-                if((int)r.StatusCode==400){File.Move(file,Path.Combine(rejected,Path.GetFileName(file)),true);Logger.Error("서버가 거부한 전송 자료를 rejected에 보존: "+await r.Content.ReadAsStringAsync(cts.Token));continue;}
-                r.EnsureSuccessStatusCode();
+                if((int)r.StatusCode==400){File.Move(file,Path.Combine(rejected,Path.GetFileName(file)),true);LastError="OBSERVATIONS_HTTP_400: 서버가 거부한 자료를 보존했습니다. 앱·서버 버전과 현장 진단을 확인하세요.";ConnectionReport.Set("OBSERVATIONS","failed",LastError);Logger.Error(LastError);continue;}
+                await AgentConnection.Ensure(r,networkStage,cts.Token);
                 using var ack=JsonDocument.Parse(await r.Content.ReadAsStringAsync(cts.Token));
                 using var original=JsonDocument.Parse(data);
                 if(ack.RootElement.GetProperty("ack").GetString()!=original.RootElement.GetProperty("id").GetString())throw new Exception("전송 확인 ID 불일치");
-                File.Delete(file);Interlocked.Increment(ref SentCount);LastSentAt=DateTime.Now;
+                File.Delete(file);Interlocked.Increment(ref SentCount);LastSentAt=DateTime.Now;ConnectionReport.Set("OBSERVATIONS","passed","화면 자료 수신 확인");
             }
             if((DateTime.UtcNow>=updateDue || ManualUpdateRequested) && (updateTask==null || updateTask.IsCompleted)) {
                 bool manual=ManualUpdateRequested;ManualUpdateRequested=false;
@@ -54,9 +87,9 @@ public sealed class ControlSink:IDisposable
                 if(cfg.AutoUpdate || manual) updateTask=Task.Run(CheckUpdates);
                 updateDue=DateTime.UtcNow.AddMinutes(2);
             }
-            LastError="";failures=0;await Task.Delay(5000,cts.Token);
-        }catch(OperationCanceledException){break;}
-        catch(Exception ex){LastError="맥 미니 전송 실패: "+ex.Message;Logger.Error(LastError);failures++;try{await Task.Delay(Math.Min(60000,2000*(1<<Math.Min(failures,5)))+Random.Shared.Next(1000),cts.Token);}catch{break;}}
+            LastError=Directory.GetFiles(rejected,"*.json").Length>0?"OBSERVATIONS_REJECTED: 서버가 거부한 전송 자료가 보존되어 있습니다. 진단 파일을 확인하세요.":"";failures=0;await Task.Delay(5000,cts.Token);
+        }catch(OperationCanceledException) when(cts.IsCancellationRequested){break;}
+        catch(Exception ex){LastError=AgentConnection.Describe(ex,networkStage);ConnectionReport.Set(networkStage,"failed",LastError);Logger.Error(LastError);failures++;try{await Task.Delay(Math.Min(60000,2000*(1<<Math.Min(failures,5)))+Random.Shared.Next(1000),cts.Token);}catch{break;}}
     }
     async Task CheckUpdates()
     {
@@ -66,7 +99,7 @@ public sealed class ControlSink:IDisposable
             var offer=Updater.Verify(envelope,cfg.UpdatePublicKey);
             if(offer.Profile!=null && offer.Profile.Revision>ProfileRevision) {
                 offer.Profile.Validate(cfg.HotelId);
-                string path=Path.Combine(AppConfig.Dir,"profile-"+cfg.HotelId+".json");
+                string path=Path.Combine(dataDirectory,"profile-"+cfg.HotelId+".json");
                 File.WriteAllText(path+".tmp",JsonDefaults.Serialize(offer.Profile));File.Move(path+".tmp",path,true);
                 ProfileChanged?.Invoke(offer.Profile);ProfileRevision=offer.Profile.Revision;
             }

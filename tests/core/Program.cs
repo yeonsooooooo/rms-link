@@ -108,5 +108,54 @@ foreach(var mode in new[]{"healthy","crash","timeout","throw"}) {
         Directory.Delete(folder,true);
     }
 }
+
+// Exercise the same HTTP validator used by Windows setup and the background retry loop.
+foreach(var scenario in new[]{"ok","expired","legacy-expired","proxy","html","wrong-service","timeout","network"}) {
+    using var client=new HttpClient(new ConnectionFixture(scenario)){BaseAddress=new Uri("https://example.test/")};
+    try {
+        await AgentConnection.Health(client,CancellationToken.None);
+        await AgentConnection.Enroll(client,Guid.NewGuid().ToString(),"c".PadLeft(48,'c'),"test",CancellationToken.None);
+        Check(scenario=="ok","Only a real service and successful enrollment pass");
+    }catch(Exception ex) {
+        var message=AgentConnection.Describe(ex,"ENROLL");
+        Check(scenario!="ok","Successful enrollment must pass");
+        Check(!message.Contains("secret-reflected")&&!message.Contains("<html>"),"Errors cannot reflect proxy bodies or secrets");
+        if(scenario.Contains("expired"))Check(message.Contains("등록권"),"Expired grant must give actionable enrollment recovery");
+        if(scenario=="timeout")Check(message.Contains("TIMEOUT"),"Timeout has a stable code for retry diagnosis");
+    }
+}
+var supportRoot=Path.Combine(Path.GetTempPath(),"rmslink-support-test-"+Guid.NewGuid());
+Directory.CreateDirectory(supportRoot);
+try {
+    string install=Path.Combine(supportRoot,"install"),app=Path.Combine(supportRoot,"app"),output=Path.Combine(supportRoot,"output");
+    // Pre-install collection succeeds with neither application nor current.txt.
+    var absent=SupportBundle.Export(install,app,output);
+    Check(File.Exists(absent),"Independent diagnostic works before installation");
+    Directory.CreateDirectory(app);Directory.CreateDirectory(install);
+    File.WriteAllText(Path.Combine(app,"config.json"),"broken JSON");
+    new StageReport(Path.Combine(install,"installation-status.json")).Set("EXTRACT","failed","Disk full");
+    var broken=SupportBundle.Export(install,app,output);
+    using(var zip=System.IO.Compression.ZipFile.OpenRead(broken))Check(zip.GetEntry("install-installation-status.json")!=null,"Broken settings cannot hide the installation failure");
+    File.WriteAllText(Path.Combine(app,"config.json"),"{\"hotelId\":\"9\",\"deviceSecret\":\"NEVER_EXPORT_THIS\",\"enrollmentCode\":\"NEVER_EXPORT_THIS\"}");
+    var clean=SupportBundle.Export(install,app,output);
+    using(var zip=System.IO.Compression.ZipFile.OpenRead(clean))foreach(var entry in zip.Entries) {
+        using var reader=new StreamReader(entry.Open());Check(!reader.ReadToEnd().Contains("NEVER_EXPORT_THIS"),"Diagnostic bundle excludes configuration secrets");
+    }
+} finally {Directory.Delete(supportRoot,true);}
 Console.WriteLine(JsonDefaults.Serialize(new {passed=true,tests=count}));return 0;
 namespace RmsLink {public class AppConfig{public static string Dir=>Path.GetTempPath();public static string InstallDir=>Path.GetTempPath();}public static class Logger{public static void Error(string s)=>Console.Error.WriteLine(s);}}
+
+sealed class ConnectionFixture(string scenario):HttpMessageHandler {
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken ct) {
+        if(scenario=="timeout")throw new TaskCanceledException();
+        if(scenario=="network")throw new HttpRequestException("secret-reflected");
+        bool health=request.RequestUri.AbsolutePath=="/health";
+        var status=System.Net.HttpStatusCode.OK;
+        string body=health?"{\"ok\":true,\"service\":\"RmsLink\"}":"{\"ok\":true}";
+        if(scenario=="wrong-service")body="{\"ok\":true,\"service\":\"Other\"}";
+        if(scenario=="proxy"){status=System.Net.HttpStatusCode.BadGateway;body="<html>secret-reflected</html>";}
+        if(scenario=="html")body="<html>secret-reflected</html>";
+        if(!health&&scenario.Contains("expired")){status=System.Net.HttpStatusCode.BadRequest;body=scenario=="expired"?"{\"code\":\"ENROLLMENT_EXPIRED\",\"error\":\"secret-reflected\"}":"{\"error\":\"설치 등록권 만료: 관리 서버에서 새 설치 파일 발급 필요\"}";}
+        return Task.FromResult(new HttpResponseMessage(status){Content=new StringContent(body)});
+    }
+}

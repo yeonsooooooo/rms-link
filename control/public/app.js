@@ -380,8 +380,21 @@ root.addEventListener("click", async (e) => {
         const link = await api("/api/installer-link");
         openModal(
           "Windows에 RmsLink 설치",
-          `<p class="sub">설치 파일을 Windows PC로 옮겨 실행한 뒤 hotel_id를 입력하세요. 등록권은 발급 후 7일간, 최대 100대에 사용할 수 있습니다.</p><label>Windows용 다운로드 주소<input readonly id="download-link" value="${escape(link.url)}"></label><div class="actions"><button id="copy-link">주소 복사</button><a class="button primary" href="/api/installer">이 기기에 다운로드</a></div><div class="notice">현재 현장 시험본은 Windows 공인 코드 서명이 없습니다. 보안 차단이 나타나면 차단 내용을 확인해 주세요. 한국어 OCR이 없으면 앱에서 진단 원인이 표시됩니다.</div>`,
+          `<p class="sub">설치 파일을 Windows PC로 옮겨 실행한 뒤 hotel_id를 입력하세요. 설치·서버 등록·화면 판독·현장 대조를 순서대로 확인합니다. 등록권이 만료되면 아래에서 새 코드를 발급하여 Windows 연결 설정에 입력하세요. (0.4.2 이상)</p><label>Windows용 다운로드 주소<input readonly id="download-link" value="${escape(link.url)}"></label><div class="actions"><button id="copy-link">주소 복사</button><a class="button primary" href="/api/installer">이 기기에 다운로드</a></div><div class="actions"><button id="new-enrollment">새 등록 코드 발급</button><a class="button" href="/api/diagnostic-tool">앱 없이 실행하는 진단 도구</a></div><p class="sub">진단 ZIP을 풀고 collect-logs.cmd를 두 번 클릭하세요. 설치가 시작되지 않아도 실행할 수 있습니다. 실행이 차단되면 차단 화면의 문구를 기록하세요.</p><div id="enrollment-result"></div><div class="notice">현재 현장 시험본은 Windows 공인 코드 서명이 없습니다. 보안 차단이 나타나면 차단 내용을 확인해 주세요. 한국어 OCR이 없으면 앱에서 진단 원인이 표시됩니다.</div>`,
         );
+        modal.querySelector("#new-enrollment").onclick = async () => {
+          const button = modal.querySelector("#new-enrollment");
+          button.disabled = true;
+          try {
+            const grant = await api("/api/enrollment", {});
+            modal.querySelector("#enrollment-result").innerHTML =
+              `<label>Windows 연결 설정에 붙여넣을 등록 코드<input readonly value="${escape(grant.code)}"></label><p class="sub">${escape(new Date(grant.expiresAt).toLocaleString())}까지 · 최대 ${grant.remaining}대 · 운영 담당자에게만 공유하세요.</p>`;
+          } catch (e) {
+            toast(e.message);
+          } finally {
+            button.disabled = false;
+          }
+        };
         modal.querySelector("#copy-link").onclick = async () => {
           await navigator.clipboard.writeText(link.url);
           toast("설치 주소를 복사했습니다.");

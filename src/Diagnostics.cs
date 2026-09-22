@@ -88,12 +88,8 @@ public static class Diagnostics
     }
     public static string ExportDiagnostics()
     {
-        string tmp=Path.Combine(Path.GetTempPath(),"rmslink-diag-"+Guid.NewGuid()),output=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),"RmsLink-진단-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".zip");
-        Directory.CreateDirectory(tmp);
-        try {
-            foreach(var file in Directory.GetFiles(AppConfig.Dir,"*.log").OrderByDescending(File.GetLastWriteTimeUtc).Take(7))File.Copy(file,Path.Combine(tmp,Path.GetFileName(file)));
-            var cfg=AppConfig.Load();File.WriteAllText(Path.Combine(tmp,"summary.json"),JsonDefaults.Serialize(new {cfg.HotelId,cfg.DeviceId,cfg.Regions,cfg.ServerUrl,cfg.AutoUpdate,version=Updater.Version,ocrLanguages=OcrService.AvailableLanguages()}));
-            ZipFile.CreateFromDirectory(tmp,output);return output;
-        }finally{Directory.Delete(tmp,true);}
+        var desktop=Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        try {return SupportBundle.Export(AppConfig.InstallDir,AppConfig.Dir,desktop);}
+        catch {return SupportBundle.Export(AppConfig.InstallDir,AppConfig.Dir,Path.GetTempPath());}
     }
 }

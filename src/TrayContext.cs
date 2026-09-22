@@ -10,7 +10,7 @@ public sealed class TrayContext : ApplicationContext
     private readonly ToolStripMenuItem _autoStartItem;
     private PreviewForm _preview;
 
-    public TrayContext(AppConfig cfg, OcrService ocr)
+    public TrayContext(AppConfig cfg, OcrService ocr, bool showPreview=false)
     {
         _cfg = cfg;
         _worker = new Worker(cfg, ocr);
@@ -107,6 +107,7 @@ public sealed class TrayContext : ApplicationContext
         _statusTimer.Tick += (_, _) => UpdateStatus();
         _statusTimer.Start();
         UpdateStatus();
+        if(showPreview)menu.BeginInvoke(new Action(ShowPreview));
     }
 
     private void UpdateStatus()

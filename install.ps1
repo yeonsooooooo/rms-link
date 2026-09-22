@@ -1,4 +1,9 @@
-# Legacy script retained only to direct users to the self-contained installer.
-Write-Host 'RmsLink는 이제 RmsLink-Setup.exe로 설치합니다.'
-Write-Host 'Mac mini 대시보드 http://127.0.0.1:18760 의 Windows 설치 파일을 사용하세요.'
-Write-Host 'DB 비밀번호, 관리자 PowerShell 또는 보안 예외 설정이 필요하지 않습니다.'
+# Compatibility entry point. A missing installer is a failure, never a silent success.
+$ErrorActionPreference = 'Stop'
+$installer = Join-Path $PSScriptRoot 'RmsLink-Setup.exe'
+if (Test-Path -LiteralPath $installer -PathType Leaf) {
+    $process = Start-Process -FilePath $installer -Wait -PassThru
+    exit $process.ExitCode
+}
+Write-Error 'RmsLink-Setup.exe is required. Download it from https://rms-link.vercel.app/ and run it on the hotel PC. For failed installations, use collect-logs.cmd from the diagnostic ZIP.'
+exit 1

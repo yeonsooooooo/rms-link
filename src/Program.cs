@@ -51,7 +51,7 @@ internal static class Program
 
     private static int RunGui(string[] args)
     {
-        using var mutex = new Mutex(true, @"Global\RmsLinkSingleton", out bool createdNew);
+        using var mutex = new Mutex(true, @"Local\RmsLinkSingleton", out bool createdNew);
         if (!createdNew)
         {
             MessageBox.Show("RmsLink가 이미 실행 중입니다.\n트레이(작업표시줄 우측 하단) 아이콘을 확인하세요.",
@@ -74,18 +74,28 @@ internal static class Program
         Logger.Info($"OS={Environment.OSVersion}, .NET={Environment.Version}, exe={Environment.ProcessPath}");
 
         var cfg = AppConfig.Load();
-        bool resume=!args.Contains("--setup") && !string.IsNullOrWhiteSpace(cfg.HotelId) && cfg.SelectedApp!=null;
+        bool resume=cfg.SetupCompleted && !args.Contains("--setup") && !string.IsNullOrWhiteSpace(cfg.HotelId) && cfg.SelectedApp!=null;
         if (!resume) {
             using var setup = new SetupForm(cfg);
+            setup.Shown += (_,_) => StartupReady(args);
             if (setup.ShowDialog() != DialogResult.OK) return 0;
         }
         // The diagnostic transport must remain alive even when OCR is unavailable.
         OcrService ocr=null;
         try { ocr=OcrService.Create(); } catch(Exception ex){Logger.Error("OCR 초기화: "+ex.Message);}
         Directory.CreateDirectory(AppConfig.InstallDir);
-        Application.Run(new TrayContext(cfg, ocr));
+        Application.Run(new TrayContext(cfg, ocr, !resume));
         Logger.Info("===== RmsLink 종료 =====");
         return 0;
+    }
+
+    private static void StartupReady(string[] args)
+    {
+        int at=Array.IndexOf(args,"--startup-report");
+        if(at<0||at+1>=args.Length)return;
+        var target=Path.GetFullPath(args[at+1]);
+        if(!target.StartsWith(AppConfig.InstallDir+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))return;
+        File.WriteAllText(target,JsonDefaults.Serialize(new{ready=true,stage="SETUP_OPEN",at=DateTimeOffset.UtcNow}));
     }
 
     private static int Safe(Func<int> f, int failCode)

@@ -48,13 +48,13 @@ public sealed class PreviewForm : Form
         _statusLabel = new Label
         {
             Location = new Point(12, 44), AutoSize = false,
-            Size = new Size(830, 20), Text = "",
+            Size = new Size(830, 60), Text = "",
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
 
         _pic = new PictureBox
         {
-            Location = new Point(12, 68), Size = new Size(830, 240),
+            Location = new Point(12, 108), Size = new Size(830, 200),
             SizeMode = PictureBoxSizeMode.Zoom,
             BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -86,7 +86,7 @@ public sealed class PreviewForm : Form
     {
         int idx = Math.Max(0, _regionCombo.SelectedIndex);
         var snaps = _worker.SnapshotDiagnostics();
-        if (idx >= snaps.Count) { foreach(var snap in snaps) snap.Image?.Dispose(); return; }
+        if (idx >= snaps.Count) { foreach(var snap in snaps) snap.Image?.Dispose(); _statusLabel.Text=_worker.LastCaptureStatus+"\n"+_worker.Sink.LastError; return; }
         for(int i=0;i<snaps.Count;i++) if(i!=idx) snaps[i].Image?.Dispose();
 
         var (img, lines, at) = snaps[idx];
@@ -120,10 +120,10 @@ public sealed class PreviewForm : Form
         _list.EndUpdate();
 
         var s = _worker.Sink;
-        string err = s.LastError.Length > 0 ? $" | 오류: {Truncate(s.LastError, 60)}" : "";
+        string err = s.LastError.Length > 0 ? $" | 오류: {s.LastError}" : "";
         _statusLabel.Text =
-            $"OCR: {_worker.OcrLang} | 마지막 판독: {(at == DateTime.MinValue ? "-" : at.ToString("HH:mm:ss"))} " +
-            $"| OCR 실행 {_worker.OcrRuns}회 | 이벤트 {_worker.EventsFound}건 발견 | 맥 미니 전송 {s.SentCount}건, 대기 {s.PendingCount}건{err}";
+            _worker.LastCaptureStatus + "\n" + $"OCR: {_worker.OcrLang} | 마지막 판독: {(at == DateTime.MinValue ? "-" : at.ToString("HH:mm:ss"))} " +
+            $"| OCR 실행 {_worker.OcrRuns}회 | 이벤트 {_worker.EventsFound}건 발견 | 맥 미니 전송 {s.SentCount}건, 대기 {s.PendingCount}건\n{err}";
     }
 
     private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n] + "…";

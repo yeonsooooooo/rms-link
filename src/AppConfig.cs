@@ -23,9 +23,11 @@ public class AppConfig
     public List<CaptureRegion> Regions {get;set;}=new();
     public int IntervalMs {get;set;}=1500;
     public int OcrScale {get;set;}=3;
+    public bool SetupCompleted {get;set;}
     public bool AutoUpdate {get;set;}=true;
     public bool ShareEvidence {get;set;}=true;
     public bool RestoreMinimized {get;set;}=true;
+    public string EnrollmentCodeOverride {get;set;}="";
     public string EnrollmentCode {get;set;}="";
     public string UpdatePublicKey {get;set;}="";
     public string DeviceSecret {get;set;}=""; // DPAPI CurrentUser encrypted
@@ -38,6 +40,11 @@ public class AppConfig
         AppConfig cfg;
         if(File.Exists(FilePath)) cfg=JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(FilePath),JsonDefaults.Options) ?? throw new Exception("설정 파일이 비어 있습니다.");
         else cfg=new();
+        // Existing installations predate the explicit setup-completion flag.
+        if(File.Exists(FilePath)) {
+            using var saved=JsonDocument.Parse(File.ReadAllText(FilePath));
+            if(!saved.RootElement.TryGetProperty("setupCompleted",out _))cfg.SetupCompleted=cfg.SelectedApp!=null&&!string.IsNullOrEmpty(cfg.DeviceSecret);
+        }
         var bootstrap=Path.Combine(InstallDir,"bootstrap.json");
         if(File.Exists(bootstrap)) {
             using var b=JsonDocument.Parse(File.ReadAllText(bootstrap));var r=b.RootElement;
@@ -45,7 +52,8 @@ public class AppConfig
             if(r.TryGetProperty("enrollmentCode",out var e)) cfg.EnrollmentCode=e.GetString();
             if(r.TryGetProperty("updatePublicKey",out var k)) cfg.UpdatePublicKey=k.GetString();
         }
-        if(!Uri.TryCreate(cfg.ServerUrl,UriKind.Absolute,out var uri) || uri.Scheme!="https" || uri.UserInfo!="" || uri.AbsolutePath!="/" || uri.Query!="") throw new Exception("HTTPS 서버 주소 오류");
+        if(!string.IsNullOrEmpty(cfg.EnrollmentCodeOverride))cfg.EnrollmentCode=cfg.EnrollmentCodeOverride;
+        if(!Uri.TryCreate(cfg.ServerUrl,UriKind.Absolute,out var uri) || uri.Scheme!="https" || uri.UserInfo!="" || uri.AbsolutePath!="/" || uri.Query!="" || uri.Fragment!="") throw new Exception("HTTPS 서버 주소 오류");
         cfg.IntervalMs=Math.Clamp(cfg.IntervalMs,1000,30000); cfg.OcrScale=Math.Clamp(cfg.OcrScale,1,5);
         return cfg;
     }
