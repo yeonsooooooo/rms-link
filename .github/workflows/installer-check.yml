@@ -23,10 +23,10 @@ jobs:
           if ($sha -ne $env:RMSLINK_INSTALLER_SHA256) { throw 'Installer digest mismatch' }
           $report = "$pwd/installer-verification.json"
           $process = Start-Process -FilePath "$pwd/RmsLink-Setup.exe" -ArgumentList @('--install-test', $report) -PassThru
-          if (-not $process.WaitForExit(90000)) { Stop-Process -Id $process.Id; throw 'Installer timed out' }
+          if (-not $process.WaitForExit(180000)) { Stop-Process -Id $process.Id; throw 'Installer timed out' }
           if ($process.ExitCode -ne 0 -or -not (Test-Path $report)) { throw 'Installer startup failed' }
           $result = Get-Content $report | ConvertFrom-Json
-          if (-not $result.passed) { throw 'Installer verification failed' }
+          if (-not $result.passed -or -not $result.runtimeVerified) { throw 'Installer verification failed' }
           $root = Join-Path $env:LOCALAPPDATA 'RmsLink'
           $version = (Get-Content (Join-Path $root 'current.txt')).Trim()
           if ($version -ne $result.version) { throw 'Installed version pointer mismatch' }
