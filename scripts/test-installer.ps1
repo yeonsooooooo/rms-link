@@ -62,5 +62,14 @@ $bundle=Get-ChildItem '.work/support-after-failure/*.zip' | Select-Object -First
 Expand-Archive $bundle.FullName '.work/support-inspection'
 if (-not (Test-Path '.work/support-inspection/install-installation-status.json')) { throw 'Installer failure missing from diagnostics' }
 if (-not (Test-Path '.work/support-inspection/environment.json')) { throw 'Broken config prevented collection' }
+# The independent collector also works when ordinary PowerShell scripts are disallowed.
+$previousPolicy=$env:PSExecutionPolicyPreference
+try {
+    $env:PSExecutionPolicyPreference='Restricted'
+    cmd.exe /c collect-logs.cmd --no-pause
+    if($LASTEXITCODE -ne 0){throw 'Command-shell diagnostic fallback failed'}
+    $fallback=Get-ChildItem $env:TEMP -Directory -Filter 'RmsLink-support-*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if(-not $fallback -or -not (Test-Path (Join-Path $fallback.FullName 'install-installation-status.json'))){throw 'Fallback lost installer failure report'}
+} finally {$env:PSExecutionPolicyPreference=$previousPolicy}
 Remove-Item (Join-Path $appData 'config.json')
-@{passed=$true;version=$version;install=$true;setupWindow=$true;normalInstallerUI=$true;reinstallPreservesSettings=$true;failedRuntimePreservesVersion=$true;standaloneDiagnostics=$true;physicalKeytechVerified=$false} | ConvertTo-Json | Set-Content 'installer-fixture-validation.json'
+@{passed=$true;version=$version;install=$true;setupWindow=$true;normalInstallerUI=$true;reinstallPreservesSettings=$true;failedRuntimePreservesVersion=$true;standaloneDiagnostics=$true;restrictedPowerShellFallback=$true;physicalKeytechVerified=$false} | ConvertTo-Json | Set-Content 'installer-fixture-validation.json'
