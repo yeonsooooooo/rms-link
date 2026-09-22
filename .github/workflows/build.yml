@@ -1,7 +1,7 @@
 name: RmsLink Windows validation
 on:
   push:
-    branches: [main, codex/rmslink-control]
+    branches: [main, "codex/**"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,6 +28,11 @@ jobs:
           $env:RMSLINK_CORE = "$pwd/core/RmsLinkCore.exe"
           npm test
           if ($LASTEXITCODE -ne 0) { throw 'Control tests failed' }
+      - name: Transport timeouts and encrypted queue recovery
+        shell: pwsh
+        run: |
+          dotnet run --project tests/windows/Transport.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Transport recovery tests failed' }
       - name: Build Windows app and run runtime tests
         shell: pwsh
         run: |
@@ -51,6 +56,9 @@ jobs:
           $hash=(Get-FileHash RmsLink.zip -Algorithm SHA256).Hash.ToLower()
           $version=([xml](Get-Content RmsLink.csproj)).Project.PropertyGroup.Version
           @{ passed=$true; version=$version; sha256=$hash; commit=$env:GITHUB_SHA; platform='windows-x64'; physicalKeytechVerified=$false; runtime=(Get-Content $report|ConvertFrom-Json); updateSmoke=$smokeResult; updateSmokePreservedShortcut=$true } | ConvertTo-Json -Depth 8 | Set-Content validation.json -Encoding utf8
+      - name: Install, reinstall, fail safely and collect diagnostics
+        shell: pwsh
+        run: ./scripts/test-installer.ps1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -63,4 +71,8 @@ jobs:
             native-selected-window.png
             native-app-picker.png
             launcher/RmsLinkLauncher.exe
+            installer-fixture-validation.json
+            installer-fixture.json
+            installer-failure.json
+            installer-timeout.json
           retention-days: 30

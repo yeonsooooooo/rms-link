@@ -43,6 +43,37 @@ try {
     path: join(artifacts, "dashboard-empty.png"),
     fullPage: true,
   });
+  writeFileSync(join(dir, "installer.exe"), "fixture");
+  writeFileSync(
+    join(dir, "installer.json"),
+    JSON.stringify({
+      version: "0.4.2",
+      installerExecutedOnWindows: true,
+      sha256: "a".repeat(64),
+    }),
+  );
+  await page.locator('[data-action="refresh"]').click();
+  await page
+    .getByRole("button", { name: "↓ Windows 설치 파일 · v0.4.2", exact: true })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "↓ Windows 설치 파일 · v0.4.2", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "새 등록 코드 발급", exact: true })
+    .click();
+  await page.locator("#enrollment-result input").waitFor();
+  assert.match(
+    await page.locator("#enrollment-result input").inputValue(),
+    /^[a-f0-9]{48}$/,
+  );
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("link", { name: "앱 없이 실행하는 진단 도구" }).click();
+  assert.equal(
+    (await downloadPromise).suggestedFilename(),
+    "RmsLink-Diagnostics.zip",
+  );
+  await page.locator("[data-close]").click();
   const deviceId = randomUUID(),
     sessionId = randomUUID(),
     now = new Date().toISOString();

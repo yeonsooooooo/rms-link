@@ -276,6 +276,34 @@ export async function createApp({
             stream.pipe(res);
             return;
           }
+          if (url.pathname === "/api/diagnostic-tool" && req.method === "GET") {
+            const script = readFileSync(
+              fileURLToPath(
+                new URL("../assets/RmsLink-Diagnostics.zip", import.meta.url),
+              ),
+            );
+            res.writeHead(200, {
+              "Content-Type": "application/octet-stream",
+              "Content-Disposition":
+                'attachment; filename="RmsLink-Diagnostics.zip"',
+            });
+            res.end(script);
+            return;
+          }
+          if (url.pathname === "/api/enrollment" && req.method === "POST") {
+            const code = store.enrollment();
+            const grant = store.get(
+              "SELECT expires_at, remaining FROM enrollments WHERE hash=?",
+              digest(code),
+            );
+            store.audit("enrollment_issued", "", {
+              expiresAt: grant.expires_at,
+            });
+            return json(
+              { code, expiresAt: grant.expires_at, remaining: grant.remaining },
+              201,
+            );
+          }
           if (url.pathname === "/api/installer-link" && req.method === "GET") {
             json({
               url: `${publicOrigin}/download/${store.downloadToken}/RmsLink-Setup.exe`,
@@ -487,25 +515,45 @@ export async function createApp({
             existing.revoked ||
             !safeEqual(existing.token_hash, digest(token))
           ) {
-            json({ error: "기기 인증 거부" }, 403);
+            json(
+              {
+                error: "기기 인증 거부",
+                code: existing.revoked
+                  ? "DEVICE_REVOKED"
+                  : "DEVICE_IDENTITY_MISMATCH",
+              },
+              403,
+            );
             return;
           }
           json({ ok: true });
           return;
         }
-        store.transaction(() => {
-          const code = store.get(
-            "SELECT * FROM enrollments WHERE hash=?",
-            digest(b.enrollmentCode),
+        const code = store.get(
+          "SELECT * FROM enrollments WHERE hash=?",
+          digest(b.enrollmentCode),
+        );
+        const failure = !code
+          ? "ENROLLMENT_INVALID"
+          : Date.parse(code.expires_at) <= Date.now()
+            ? "ENROLLMENT_EXPIRED"
+            : code.remaining <= 0
+              ? "ENROLLMENT_EXHAUSTED"
+              : null;
+        if (failure) {
+          store.audit("enrollment_failed", "", {
+            deviceId: b.deviceId,
+            code: failure,
+          });
+          return json(
+            {
+              error: "설치 등록권 만료: 관리 서버에서 새 등록 코드 발급 필요",
+              code: failure,
+            },
+            400,
           );
-          if (
-            !code ||
-            code.remaining <= 0 ||
-            Date.parse(code.expires_at) < Date.now()
-          )
-            throw new Error(
-              "설치 등록권 만료: 관리 서버에서 새 설치 파일 발급 필요",
-            );
+        }
+        store.transaction(() => {
           store.run(
             "UPDATE enrollments SET remaining=remaining-1 WHERE hash=?",
             code.hash,

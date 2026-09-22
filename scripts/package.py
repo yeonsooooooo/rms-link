@@ -1,11 +1,15 @@
 """Build private single-EXE installer using Windows-validated release artifacts."""
-import argparse, hashlib, json, shutil, subprocess, zipfile
-from pathlib import Path
+import argparse, hashlib, json, re, shutil, subprocess, zipfile
+from pathlib import Path, PureWindowsPath
 ROOT=Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('--artifacts',type=Path,required=True);p.add_argument('--bootstrap',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--dotnet',default='/Users/ys/.local/share/rmslink-dotnet/dotnet');args=p.parse_args()
 report=json.loads((args.artifacts/'validation.json').read_text(encoding='utf-8-sig'));archive=args.artifacts/'RmsLink.zip'
 if not report['passed'] or not report['runtime']['passed'] or hashlib.sha256(archive.read_bytes()).hexdigest()!=report['sha256']:raise SystemExit('Windows validation/artifact mismatch')
-version=report['version'];work=ROOT/'.work/installer-payload'
+version=report['version']
+if not re.fullmatch(r'\d+\.\d+\.\d+', version):raise SystemExit('Unsafe version')
+bootstrap=json.loads(args.bootstrap.read_text(encoding='utf-8-sig'))
+if not isinstance(bootstrap.get('enrollmentCode'),str) or not bootstrap['enrollmentCode']:raise SystemExit('Missing enrollment code')
+work=ROOT/'.work/installer-payload'
 if work.exists():shutil.rmtree(work)
 work.mkdir(parents=True,exist_ok=True)
 app=work/'versions'/version
@@ -13,7 +17,7 @@ if app.exists():shutil.rmtree(app)
 app.mkdir(parents=True)
 with zipfile.ZipFile(archive) as z:
     for name in z.namelist():
-        if '..' in Path(name).parts or Path(name).is_absolute():raise SystemExit('Unsafe ZIP')
+        if '..' in PureWindowsPath(name).parts or PureWindowsPath(name).is_absolute() or PureWindowsPath(name).drive:raise SystemExit('Unsafe ZIP')
     z.extractall(app)
 launcher=args.artifacts/'launcher/RmsLinkLauncher.exe'
 if not launcher.exists():launcher=args.artifacts/'RmsLinkLauncher.exe'

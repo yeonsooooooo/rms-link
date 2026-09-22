@@ -1,4 +1,5 @@
 using System.Drawing.Imaging;
+using RmsLink.Shared;
 namespace RmsLink;
 public sealed class LineDiag { public string Text; public ParsedEvent Event; public string Reason; public bool IsNew; public string Source; }
 public sealed class RegionDiag { public int Index; public Bitmap LastImage; public List<LineDiag> Lines=new(); public DateTime LastOcrAt=DateTime.MinValue; }
@@ -18,6 +19,8 @@ public sealed class Worker : IDisposable
     long accessibilityHandle;
     DateTime lastAccessibilityStart, lastRestore=DateTime.MinValue;
     public readonly ControlSink Sink;
+    readonly StageReport captureReport=new(Path.Combine(AppConfig.Dir,"capture-status.json"));
+    public string LastCaptureStatus="첫 화면을 기다리는 중";
     public long OcrRuns,EventsFound;
     public DateTime LastCycleAt=DateTime.MinValue;
     public string OcrLang=>ocr?.LanguageTag??"없음";
@@ -117,6 +120,9 @@ public sealed class Worker : IDisposable
                     foreach(var field in new[]{"door","key"}) if(!visible.Contains(room+"|"+field)) uncertain.Add(new(room,field));
                 }
                 errors=errors.Distinct().Take(30).ToList(); warnings=warnings.Distinct().Take(30).ToList();
+                LastCaptureStatus=errors.Count>0?string.Join(" · ",errors):accepted.Count>0?"화면 판독 확인 · 실제 문·키 대조 필요":"화면 수집 중 · 판독 연속 확인 또는 새 이벤트 대기";
+                captureReport.Set("CAPTURE",evidence==null?"failed":"passed",evidence==null?LastCaptureStatus:"선택한 창 이미지 캡처 확인");
+                captureReport.Set("READING",errors.Count>0?"failed":accepted.Count>0?"passed":"waiting",LastCaptureStatus+(warnings.Count>0?" · "+string.Join(" · ",warnings):""));
                 var methods=new {
                     uia=new {status=uiaStatus,lineCount=uia.Count,candidateCount=result.Lines.Where(l=>l.Source=="uia").Sum(l=>l.Events.Count),acceptedCount=accepted.Count(e=>e.Source is "uia" or "hybrid")},
                     ocr=new {status=ocrStatus,lineCount=ocrLines.Count,candidateCount=result.Lines.Where(l=>l.Source=="ocr").Sum(l=>l.Events.Count),acceptedCount=accepted.Count(e=>e.Source is "ocr" or "hybrid")}
@@ -155,7 +161,7 @@ public sealed class Worker : IDisposable
                     foreach(var d in diags) d.LastImage?.Dispose(); diags.Clear();
                     diags.Add(new(){Index=0,LastImage=evidence==null?null:(Bitmap)evidence.Clone(),Lines=diagLines,LastOcrAt=DateTime.Now});
                 }
-            } catch(Exception ex) { Logger.Error("수집 실패: "+ex.Message); Sink.LastError=ex.Message; reader.BreakContinuity(); }
+            } catch(Exception ex) { Logger.Error("수집 실패: "+ex.Message); LastCaptureStatus="CAPTURE_FAILURE: "+ex.Message;captureReport.Set("CAPTURE","failed",LastCaptureStatus); reader.BreakContinuity(); }
             finally { evidence?.Dispose(); LastCycleAt=DateTime.Now; }
             try { await Task.Delay(activeProfile.PollMs,cts.Token); } catch(OperationCanceledException) { break; }
         }

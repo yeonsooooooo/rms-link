@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -15,11 +17,32 @@ const localResponse = await fetch(localOrigin + "/api/state", {
 });
 assert.equal(localResponse.status, 200);
 const local = await localResponse.json();
-const origin =
+const entryOrigin =
   process.env.RMSLINK_DASHBOARD_ORIGIN ?? local.access.publicOrigin;
-assert.equal(new URL(origin).protocol, "https:");
+assert.equal(new URL(entryOrigin).protocol, "https:");
+const routing = JSON.parse(
+  readFileSync(
+    new URL("../deploy/vercel/vercel.json", import.meta.url),
+    "utf8",
+  ),
+);
+const expectedTarget = routing.redirects?.find(
+  (route) => route.source === "/",
+)?.destination;
+const landing = await fetch(entryOrigin + "/", {
+  redirect: "manual",
+  signal: AbortSignal.timeout(25000),
+});
+if (expectedTarget && entryOrigin === local.access.publicOrigin)
+  assert.equal(landing.status, 307, "Public dashboard entry redirect");
+let origin = entryOrigin;
+if (landing.status === 307) {
+  assert.equal(landing.headers.get("location"), expectedTarget);
+  origin = new URL(expectedTarget).origin;
+} else assert.equal(landing.status, 200);
+await landing.body?.cancel();
 let cookie;
-const api = (path, { body, ...options } = {}) =>
+const request = (path, { body, ...options } = {}) =>
   fetch(origin + path, {
     signal: AbortSignal.timeout(25000),
     redirect: "manual",
@@ -34,7 +57,31 @@ const api = (path, { body, ...options } = {}) =>
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-const result = { origin, checkedAt: new Date().toISOString(), passed: false };
+const readRetries = [];
+const api = async (path, options = {}) => {
+  for (let attempt = 0; ; attempt++) {
+    const response = await request(path, options);
+    if (
+      options.body === undefined &&
+      (!options.method || options.method === "GET") &&
+      [502, 503, 504].includes(response.status) &&
+      attempt < 2
+    ) {
+      readRetries.push({ path, status: response.status });
+      await response.body?.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      continue;
+    }
+    return response;
+  }
+};
+const result = {
+  entryOrigin,
+  origin,
+  entryRedirect: origin !== entryOrigin,
+  checkedAt: new Date().toISOString(),
+  passed: false,
+};
 try {
   assert.equal((await api("/health")).status, 200);
   const home = await api("/");
@@ -90,7 +137,7 @@ try {
   result.installerWindowsVerified = remote.installer?.windowsVerified === true;
   result.readingMethods = remote.capabilities.includes("reading-methods-v1");
   assert.equal(remote.access.remote, true);
-  assert.equal(remote.access.publicOrigin, origin);
+  assert.equal(remote.access.publicOrigin, local.access.publicOrigin);
   assert.equal((await api("/api/access")).status, 403);
   assert.equal(
     (
@@ -104,9 +151,44 @@ try {
   result.deviceCount = remote.devices.length;
   result.uncached = true;
   const shortcut = await (await api("/api/shortcut")).text();
-  assert.equal(shortcut, `[InternetShortcut]\r\nURL=${origin}/\r\n`);
-  assert((await (await api("/manual.html")).text()).includes(origin));
+  assert.equal(
+    shortcut,
+    `[InternetShortcut]\r\nURL=${local.access.publicOrigin}/\r\n`,
+  );
+  const manual = await api("/manual.html");
+  assert.equal(manual.status, 200);
+  assert((await manual.text()).includes(local.access.publicOrigin));
   result.manualAndShortcut = true;
+  const grantResponse = await api("/api/enrollment", { body: {} });
+  assert.equal(grantResponse.status, 201);
+  const grant = await grantResponse.json();
+  try {
+    assert.match(grant.code, /^[a-f0-9]{48}$/);
+    assert(Date.parse(grant.expiresAt) > Date.now());
+    assert.equal(grant.remaining, 100);
+    result.enrollmentRecovery = true;
+  } finally {
+    // This operator verification runs on the same server; remove only its unused test grant.
+    const db = new DatabaseSync(join(directory, "state.db"));
+    try {
+      db.prepare("DELETE FROM enrollments WHERE hash=?").run(
+        createHash("sha256").update(grant.code).digest("hex"),
+      );
+    } finally {
+      db.close();
+    }
+  }
+  const diagnostic = await api("/api/diagnostic-tool");
+  assert.equal(diagnostic.status, 200);
+  assert.match(
+    diagnostic.headers.get("content-disposition"),
+    /RmsLink-Diagnostics.zip/,
+  );
+  assert.deepEqual(
+    Buffer.from(await diagnostic.arrayBuffer()),
+    readFileSync(new URL("../assets/RmsLink-Diagnostics.zip", import.meta.url)),
+  );
+  result.independentDiagnostics = true;
   const link = await (await api("/api/installer-link")).json();
   const installer = await api("/api/installer");
   assert.equal(installer.status, 302);
@@ -147,6 +229,7 @@ try {
   assert.equal((await api("/api/state")).status, 401);
   result.logout = true;
   result.passed = true;
+  result.readRetries = readRetries;
   mkdirSync("artifacts", { recursive: true });
   writeFileSync(
     "artifacts/vercel-verification.json",

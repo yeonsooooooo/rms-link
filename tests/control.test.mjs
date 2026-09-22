@@ -647,3 +647,59 @@ test("method provenance survives ingestion and human sample accuracy counts wron
     "Old scope cannot be reviewed as current",
   );
 });
+
+test("expired or exhausted installers recover with a fresh authenticated grant without consuming it twice", async (t) => {
+  const a = await setup(t),
+    token = "b".repeat(64),
+    deviceId = randomUUID();
+  assert.equal((await req(a.agentUrl, "/api/enrollment", {})).status, 403);
+  assert.equal((await req(a.url, "/api/enrollment", {}, token)).status, 401);
+  const grant = await req(a.url, "/api/enrollment", {}, a.store.adminToken);
+  assert.equal(grant.status, 201);
+  assert.match(grant.data.code, /^[a-f0-9]{48}$/);
+  const enroll = (code) =>
+    req(
+      a.agentUrl,
+      "/agent/enroll",
+      { deviceId, machine: "test", enrollmentCode: code },
+      token,
+    );
+  a.store.run(
+    "UPDATE enrollments SET expires_at=?",
+    new Date(Date.now() - 1000).toISOString(),
+  );
+  assert.equal((await enroll(grant.data.code)).data.code, "ENROLLMENT_EXPIRED");
+  assert.equal(a.store.get("SELECT count(*) AS n FROM devices").n, 0);
+  const next = await req(a.url, "/api/enrollment", {}, a.store.adminToken);
+  a.store.run(
+    "UPDATE enrollments SET remaining=0 WHERE expires_at=?",
+    next.data.expiresAt,
+  );
+  assert.equal(
+    (await enroll(next.data.code)).data.code,
+    "ENROLLMENT_EXHAUSTED",
+  );
+  const fresh = await req(a.url, "/api/enrollment", {}, a.store.adminToken);
+  assert.equal((await enroll(fresh.data.code)).status, 201);
+  assert.equal((await enroll("expired-and-no-longer-needed")).status, 200);
+  const rows = a.store.all(
+    "SELECT detail FROM audit WHERE type IN ('enrollment_failed','enrollment_issued')",
+  );
+  assert(
+    rows.every(
+      (r) =>
+        !r.detail.includes(fresh.data.code) &&
+        !r.detail.includes(grant.data.code),
+    ),
+  );
+  const script = await fetch(a.url + "/api/diagnostic-tool", {
+    headers: { Authorization: "Bearer " + a.store.adminToken },
+  });
+  assert.equal(script.status, 200);
+  assert.equal(
+    Buffer.from(await script.arrayBuffer())
+      .subarray(0, 2)
+      .toString(),
+    "PK",
+  );
+});
