@@ -1,6 +1,11 @@
 name: RmsLink installer verification
 on:
   workflow_dispatch:
+    inputs:
+      candidate_sha256:
+        description: "SHA-256 of the staged installer (uses the existing private download connection)"
+        type: string
+        required: false
 permissions:
   contents: read
 jobs:
@@ -12,15 +17,24 @@ jobs:
         env:
           RMSLINK_INSTALLER_URL: ${{ secrets.RMSLINK_INSTALLER_URL }}
           RMSLINK_INSTALLER_SHA256: ${{ secrets.RMSLINK_INSTALLER_SHA256 }}
+          RMSLINK_CANDIDATE_SHA256: ${{ inputs.candidate_sha256 }}
         run: |
           $ErrorActionPreference = 'Stop'
           $uri = [Uri]$env:RMSLINK_INSTALLER_URL
           if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'ys-macmini.tail984bfd.ts.net' -or $uri.Port -ne 8443) { throw 'Unexpected installer origin' }
+          $expectedSha = $env:RMSLINK_INSTALLER_SHA256
+          if ($env:RMSLINK_CANDIDATE_SHA256) {
+            if ($env:RMSLINK_CANDIDATE_SHA256 -notmatch '^[a-f0-9]{64}$') { throw 'Invalid candidate SHA-256' }
+            $expectedSha = $env:RMSLINK_CANDIDATE_SHA256
+            $candidate = [UriBuilder]::new($uri)
+            $candidate.Query = 'candidate=' + $expectedSha
+            $uri = $candidate.Uri
+          }
           $ProgressPreference = 'SilentlyContinue'
           curl.exe --fail --location --retry 2 --max-time 1200 --silent --show-error --output RmsLink-Setup.exe $uri.AbsoluteUri
           if ($LASTEXITCODE -ne 0) { throw 'Installer download failed' }
           $sha = (Get-FileHash RmsLink-Setup.exe -Algorithm SHA256).Hash.ToLower()
-          if ($sha -ne $env:RMSLINK_INSTALLER_SHA256) { throw 'Installer digest mismatch' }
+          if ($sha -ne $expectedSha) { throw 'Installer digest mismatch' }
           $report = "$pwd/installer-verification.json"
           $process = Start-Process -FilePath "$pwd/RmsLink-Setup.exe" -ArgumentList @('--install-test', $report) -PassThru
           if (-not $process.WaitForExit(180000)) { Stop-Process -Id $process.Id; throw 'Installer timed out' }
