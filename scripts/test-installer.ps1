@@ -11,7 +11,7 @@ python scripts/package.py --artifacts "$pwd" --bootstrap "$pwd/.work/ci-bootstra
 if ($LASTEXITCODE -ne 0) { throw 'Installer packaging failed' }
 function Run-Installer([string]$Exe,[string]$Report,[int]$Expected) {
     $p=Start-Process -FilePath $Exe -ArgumentList @('--install-test',('"'+$Report+'"')) -PassThru
-    if (-not $p.WaitForExit(180000)) { $p.Kill(); throw 'Installer timed out' }
+    if (-not $p.WaitForExit(180000)) { Copy-Item "$root/installation-status.json" "$pwd/installer-timeout.json" -ErrorAction SilentlyContinue; $p.Kill(); throw 'Installer timed out' }
     if ($p.ExitCode -ne $Expected -or -not (Test-Path $Report)) { throw "Unexpected installer exit: $($p.ExitCode)" }
     return Get-Content $Report -Raw | ConvertFrom-Json
 }

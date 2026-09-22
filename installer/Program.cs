@@ -2,6 +2,7 @@ using RmsLink.Shared;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
+using System.Reflection.PortableExecutable;
 using System.Text.Json;
 namespace RmsLinkInstaller;
 static class Program
@@ -109,6 +110,13 @@ static class Program
     static void WriteResult(string path, object result) { Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))); File.WriteAllText(path,JsonSerializer.Serialize(result)); }
     static void RunRuntime(string exe,string output,string version) {
         File.Delete(output);
+        // Reject corrupt/non-Windows files before invoking the OS loader, which can display
+        // a blocking compatibility dialog before Process.Start returns.
+        try {
+            using var file=File.OpenRead(exe);using var pe=new PEReader(file);
+            if(pe.PEHeaders.PEHeader==null || pe.PEHeaders.CoffHeader.Machine!=Machine.Amd64)
+                throw new BadImageFormatException();
+        } catch(BadImageFormatException) {throw new Exception("설치 프로그램 실행 파일이 손상되었거나 x64 Windows 형식이 아닙니다. 설치 파일을 새로 다운로드하세요.");}
         var start=new ProcessStartInfo(exe){UseShellExecute=false}; start.ArgumentList.Add("--runtime-test"); start.ArgumentList.Add(output);
         using var p=Process.Start(start)??throw new Exception("실행 점검 프로세스 시작 실패");
         if(!p.WaitForExit(45000)){p.Kill(true);p.WaitForExit(5000);throw new Exception("실행 점검 시간 초과. 보안 프로그램의 차단 기록을 확인하세요.");}

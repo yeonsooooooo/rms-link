@@ -74,4 +74,5 @@ jobs:
             installer-fixture-validation.json
             installer-fixture.json
             installer-failure.json
+            installer-timeout.json
           retention-days: 30
