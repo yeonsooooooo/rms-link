@@ -44,7 +44,9 @@ public sealed class Worker : IDisposable
         // A result is consumed once; an old/hung provider must never confirm another frame.
         try {
             var read=await task;
-            if(accessibilityWindow!=window || !WindowProbe.SameGeometry(window) || DateTime.UtcNow-lastAccessibilityStart>=TimeSpan.FromSeconds(3)) { warnings.Add("UIA_STALE: 직접 읽기 응답이 늦거나 창 위치가 바뀌어 이번 화면에는 사용하지 않았습니다"); return (new(),"stale"); }
+            if(accessibilityWindow.Handle!=window.Handle || accessibilityWindow.ProcessId!=window.ProcessId ||
+                accessibilityWindow.X!=window.X || accessibilityWindow.Y!=window.Y || accessibilityWindow.W!=window.W || accessibilityWindow.H!=window.H ||
+                !WindowProbe.SameGeometry(window) || DateTime.UtcNow-lastAccessibilityStart>=TimeSpan.FromSeconds(3)) { warnings.Add("UIA_STALE: 직접 읽기 응답이 늦거나 창 위치가 바뀌어 이번 화면에는 사용하지 않았습니다"); return (new(),"stale"); }
             warnings.AddRange(read.Warnings);
             return (read.Lines,read.Lines.Count>0?"ok":"empty");
         } catch { warnings.Add("UIA_UNAVAILABLE: 접근성 조회 실패 · OCR 사용"); return (new(),"error"); }
@@ -129,8 +131,8 @@ public sealed class Worker : IDisposable
                     lastHealth=Health.Code;
                 }
                 captureReport.Set("CAPTURE",evidence==null?"failed":"passed",evidence==null?LastCaptureStatus:"선택한 창 이미지 캡처 확인");
-                captureReport.Set("READING",errors.Count>0?"failed":Health.NeedsAttention?"waiting":"passed",LastCaptureStatus+$" · 글자 {Health.TextLines}줄 / 해석 {Health.Candidates} / 채택 {Health.Accepted}"+(warnings.Count>0?" · "+string.Join(" · ",warnings):""));
                 captureReport.Set("READING_REASONS","info",string.Join(" · ",result.Lines.Where(l=>l.Reason.Length>0).GroupBy(l=>l.Reason).OrderByDescending(g=>g.Count()).Take(10).Select(g=>$"{g.Key}: {g.Count()}줄")));
+                captureReport.Set("READING",errors.Count>0?"failed":Health.NeedsAttention?"waiting":"passed",LastCaptureStatus+$" · 글자 {Health.TextLines}줄 / 해석 {Health.Candidates} / 채택 {Health.Accepted}"+(warnings.Count>0?" · "+string.Join(" · ",warnings):""));
                 var methods=new {
                     uia=new {status=uiaStatus,lineCount=uia.Count,candidateCount=result.Lines.Where(l=>l.Source=="uia").Sum(l=>l.Events.Count),acceptedCount=accepted.Count(e=>e.Source is "uia" or "hybrid")},
                     ocr=new {status=ocrStatus,lineCount=ocrLines.Count,candidateCount=result.Lines.Where(l=>l.Source=="ocr").Sum(l=>l.Events.Count),acceptedCount=accepted.Count(e=>e.Source is "ocr" or "hybrid")}
