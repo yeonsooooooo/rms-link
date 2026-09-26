@@ -45,7 +45,7 @@ vercel deploy --prod --yes
 launchctl print gui/$(id -u)/kr.co.rosegold.rmslink-control
 ```
 
-서버 코드: `/Users/ys/dev/rms-link`. 0.4.2는 `codex/install-recovery`에서 Windows 검증을 거쳐 수동 게시했습니다. 기존 자동 배포 설정은 `codex/rmslink-control`의 `build.yml` 성공 실행을 추적합니다. 검증용 브랜치를 push하는 것만으로 자동 게시되지 않으며, 향후 추적 브랜치를 바꾸려면 `RMSLINK_RELEASE_BRANCH`도 변경해야 합니다.
+서버 코드: `/Users/ys/dev/rms-link`. 0.4.3은 `codex/reading-recovery`에서 Windows 검증을 거친 뒤 Mac mini SSH 세션에서 게시했습니다. 기존 자동 배포 설정은 `codex/rmslink-control`의 `build.yml` 성공 실행을 추적합니다. 검증용 브랜치를 push하는 것만으로 자동 게시되지 않으며, 향후 추적 브랜치를 바꾸려면 `RMSLINK_RELEASE_BRANCH`도 변경해야 합니다.
 
 ## 계속 개선하기
 
