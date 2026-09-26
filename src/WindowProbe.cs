@@ -103,7 +103,7 @@ public static class WindowProbe
         var watch=Stopwatch.StartNew();int visited=0,failures=0;bool limited=false;
         bool Budget() { if(visited>=4000 || watch.ElapsedMilliseconds>=1200){limited=true;return false;}return true; }
         bool Inside(System.Windows.Rect rect) => !rect.IsEmpty && rect.Width>0 && rect.Height>0 && clip.Contains(rect);
-        void Walk(AutomationElement node,int depth,string scope,bool inRow)
+        void Walk(AutomationElement node,int depth,string scope,bool inRow,string tableScope=null)
         {
             if(!Budget())return;
             visited++;
@@ -112,13 +112,18 @@ public static class WindowProbe
                 if(current.IsPassword)return;
                 var type=current.ControlType;
                 bool row=type==ControlType.DataItem || type==ControlType.ListItem;
-                if(!inRow && (row || type==ControlType.Table || type==ControlType.DataGrid || type==ControlType.List || type==ControlType.Pane || type==ControlType.Group))scope=visited.ToString();
+                // DataGridView may label each cell (not its row) as DataItem.
+                // Keep the whole table's cells in one coordinate space so those
+                // cells can be joined by Y, regardless of wrappers/column groups.
+                if(type==ControlType.Table || type==ControlType.DataGrid || type==ControlType.List)tableScope=visited.ToString();
+                if(tableScope!=null)scope=tableScope;
+                else if(!inRow && (row || type==ControlType.Pane || type==ControlType.Group))scope=visited.ToString();
                 int before=fragments.Count+result.Lines.Count;
                 // Traverse nested wrappers, even when their own Name or rectangle is empty.
                 var child=walker.GetFirstChild(node);
                 if(child!=null && depth>=24)limited=true;
                 while(child!=null && depth<24 && Budget()) {
-                    Walk(child,depth+1,scope,inRow||row);
+                    Walk(child,depth+1,scope,inRow||row,tableScope);
                     try {child=walker.GetNextSibling(child);}catch {failures++;break;}
                 }
                 if(current.IsOffscreen || !Inside(current.BoundingRectangle))return;
