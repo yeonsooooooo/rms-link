@@ -297,7 +297,7 @@ test(
       "101 고객키투입 12:01:00",
       "101",
       "KEY_IN_GUEST",
-      now(),
+      "2026-09-15T03:10:00Z",
     );
     await a.worker.publish(p, "test");
     assert.equal(a.store.profile("9").revision, 2);
@@ -464,6 +464,46 @@ test("physical check requires a recent accepted reading and four actions on the 
         code,
       }),
     /최근 판독/,
+  );
+});
+
+test("partial reading quarantines only affected fields and prevents certifying a now-conflicted field", async (t) => {
+  const a = await setup(t),
+    d = await enrolled(a);
+  const good = fieldBatch(d, "DOOR_OPEN");
+  good.events = [
+    ...good.observation.readings,
+    { ...good.observation.readings[0], room: "102" },
+  ];
+  good.observation.capturedAt = new Date(Date.now() - 2000).toISOString();
+  a.store.ingest(good);
+  const partial = fieldBatch(d, "DOOR_OPEN", {
+    readings: [{ ...good.observation.readings[0], room: "102" }],
+    warnings: ["READING_CONFLICT: 101 door 판독 불일치"],
+    uncertainFields: [{ room: "101", field: "door" }],
+  });
+  partial.events = partial.observation.readings;
+  a.store.ingest(partial);
+  const rooms = a.store.snapshot("9").rooms;
+  assert.equal(rooms.find((r) => r.room === "101").door.value, null);
+  assert.equal(rooms.find((r) => r.room === "102").door.value, "open");
+  assert.throws(
+    () =>
+      a.store.confirmFieldCheck({
+        deviceId: d.deviceId,
+        batchId: good.id,
+        room: "101",
+        code: "DOOR_OPEN",
+      }),
+    /최근 화면/,
+  );
+  assert.doesNotThrow(() =>
+    a.store.confirmFieldCheck({
+      deviceId: d.deviceId,
+      batchId: partial.id,
+      room: "102",
+      code: "DOOR_OPEN",
+    }),
   );
 });
 

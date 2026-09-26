@@ -319,7 +319,7 @@ export class Store {
     );
     if (
       !reading ||
-      o.uncertainFields?.some(
+      [...(o.uncertainFields ?? []), ...(live.uncertainFields ?? [])].some(
         (f) =>
           f.room === room &&
           f.field === (code.startsWith("DOOR") ? "door" : "key"),

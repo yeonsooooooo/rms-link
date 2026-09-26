@@ -40,35 +40,46 @@ public sealed class ReadingSession
         var result = new ReadingResult { SuggestedMode = profile.Mode };
         var candidates = new List<(ParsedEvent Event, string Source)>();
         var currentOcr = new HashSet<string>();
+        var rejectedRooms = new HashSet<string>();
         bool snapshotCandidate = false;
         foreach(var source in new[]{(Lines:uia,Source:"uia"),(Lines:ocr,Source:"ocr")})
         foreach(var text in source.Lines.Take(300)) {
-            var events = EventParser.Parse(text,now,profile,out var reason);
+            var events = EventParser.Parse(text,now,profile,out var reason,out var uncertainRooms);
+            rejectedRooms.UnionWith(uncertainRooms);
             result.Lines.Add(new(text,source.Source,reason,events));
             candidates.AddRange(events.Select(e=>(e,source.Source)));
             if(source.Source=="ocr") foreach(var e in events) currentOcr.Add(EvidenceKey(e));
-            if(reason.StartsWith("등록되지 않은 객실번호")) result.Errors.Add("ROOM_NOT_ALLOWED: "+reason);
-            if(reason.StartsWith("여러 객실번호") || reason.StartsWith("한 줄에 상충")) result.Errors.Add("LAYOUT_AMBIGUOUS: "+reason);
+            if(reason.StartsWith("등록되지 않은 객실번호")) result.Warnings.Add("ROOM_NOT_ALLOWED: "+reason);
+            if(uncertainRooms.Count>0) result.Warnings.Add("LAYOUT_AMBIGUOUS: "+reason);
             if(profile.Mode=="events" && reason.StartsWith("시각 없음")) {
                 var probe = new AdapterProfile { Mode="snapshot", RoomPattern=profile.RoomPattern, RoomMap=profile.RoomMap, Aliases=profile.Aliases, ExpectedRooms=profile.ExpectedRooms };
                 if(EventParser.Parse(text,now,probe,out _).Count>0) snapshotCandidate=true;
             }
         }
+        var conflictedFields=new HashSet<string>();
+        foreach(var room in rejectedRooms)
+        foreach(var field in new[]{"door","key"})conflictedFields.Add(room+"|"+field);
         foreach(var pair in candidates.Where(c=>c.Event.Kind=="event").GroupBy(c=>$"{c.Event.Code}|{c.Event.OccurredAt:O}")) {
             var accessibleRooms=pair.Where(c=>c.Source=="uia").Select(c=>c.Event.Room).Distinct().ToArray();
             var imageRooms=pair.Where(c=>c.Source=="ocr").Select(c=>c.Event.Room).Distinct().ToArray();
-            if(accessibleRooms.Length==1 && imageRooms.Length==1 && accessibleRooms[0]!=imageRooms[0])
-                result.Errors.Add($"READING_CONFLICT: 동일 상태·시각의 객실 번호가 접근성({accessibleRooms[0]})과 OCR({imageRooms[0]})에서 다릅니다");
+            if(accessibleRooms.Length==1 && imageRooms.Length==1 && accessibleRooms[0]!=imageRooms[0]) {
+                result.Warnings.Add($"READING_CONFLICT: 동일 상태·시각의 객실 번호가 접근성({accessibleRooms[0]})과 OCR({imageRooms[0]})에서 다릅니다");
+                foreach(var candidate in pair)conflictedFields.Add(candidate.Event.Room+"|"+Field(candidate.Event));
+            }
         }
-        // Compare channels per room, field and source timestamp, not whole-screen success.
-        foreach(var group in candidates.GroupBy(c=>$"{c.Event.Room}|{Field(c.Event)}|{c.Event.Kind}|{(c.Event.Kind=="event"?c.Event.OccurredAt.ToString("O"):"")}")) {
+        // Identify all conflicts before accepting any timestamp for the affected field.
+        var groups=candidates.GroupBy(c=>$"{c.Event.Room}|{Field(c.Event)}|{c.Event.Kind}|{(c.Event.Kind=="event"?c.Event.OccurredAt.ToString("O"):"")}").ToList();
+        foreach(var group in groups) {
             var values = group.Select(c=>c.Event.Code).Distinct().ToArray();
             var chosen = group.First();
             if(values.Length>1) {
-                result.Errors.Add($"READING_CONFLICT: {chosen.Event.Room} {Field(chosen.Event)} 판독 불일치");
-                result.UncertainFields.Add(new(chosen.Event.Room,Field(chosen.Event)));
-                continue;
+                result.Warnings.Add($"READING_CONFLICT: {chosen.Event.Room} {Field(chosen.Event)} 판독 불일치");
+                conflictedFields.Add(chosen.Event.Room+"|"+Field(chosen.Event));
             }
+        }
+        foreach(var group in groups) {
+            var chosen=group.First();
+            if(conflictedFields.Contains(chosen.Event.Room+"|"+Field(chosen.Event)))continue;
             var accessible = group.FirstOrDefault(c=>c.Source=="uia");
             if(accessible.Event!=null) chosen=accessible;
             else if(!previousOcr.Contains(EvidenceKey(chosen.Event))) {
@@ -78,6 +89,13 @@ public sealed class ReadingSession
             }
             result.Events.Add(chosen.Event with { Source = accessible.Event!=null ? (group.Any(c=>c.Source=="ocr") ? "hybrid" : "uia") : "ocr" });
         }
+        // Quarantine the affected room/field, including other timestamps in this frame.
+        // A malformed unrelated row must not suppress valid rooms across the whole hotel.
+        result.Events.RemoveAll(e=>conflictedFields.Contains(e.Room+"|"+Field(e)));
+        foreach(var key in conflictedFields) {
+            int split=key.LastIndexOf('|');result.UncertainFields.Add(new(key[..split],key[(split+1)..]));
+        }
+        currentOcr.ExceptWith(candidates.Where(c=>conflictedFields.Contains(c.Event.Room+"|"+Field(c.Event))).Select(c=>EvidenceKey(c.Event)));
         previousOcr=currentOcr; previousAt=now;
         if(result.Pending>0) result.Warnings.Add($"OCR_CONFIRMING: {result.Pending}개 상태를 다음 화면과 대조 중");
         if(snapshotCandidate) {

@@ -88,32 +88,74 @@ public static class WindowProbe
     }
     public static bool SameGeometry(WindowCandidate selected)=>GetWindowThreadProcessId(new(selected.Handle),out var pid)>0 && pid==selected.ProcessId && GetCaptureRect(new(selected.Handle),out var r)&&r.L==selected.X&&r.T==selected.Y&&r.R-r.L==selected.W&&r.B-r.T==selected.H;
 
-    public static List<string> ReadAccessibleRows(WindowCandidate window)
+    public static List<string> ReadAccessibleRows(WindowCandidate window) => ReadAccessible(window).Lines;
+
+    public static AccessibleReadResult ReadAccessible(WindowCandidate window,Rectangle? region=null)
     {
         var root=AutomationElement.FromHandle(new IntPtr(window.Handle));
-        var list=new List<string>();
-        var walker=TreeWalker.ControlViewWalker;var queue=new Queue<(AutomationElement,int)>();queue.Enqueue((root,0));int count=0;
-        // Bounded traversal of the selected RMS window; provider failures are reported by caller.
-        while(queue.Count>0 && count++<700) {
-            var (e,depth)=queue.Dequeue();
-            var current=e.Current;
-            if(!current.IsOffscreen && (current.ControlType==ControlType.DataItem || current.ControlType==ControlType.ListItem)) {
-                var words=new List<string>(); if(!string.IsNullOrWhiteSpace(current.Name))words.Add(current.Name);
-                var child=walker.GetFirstChild(e);int cells=0;
-                while(child!=null && cells++<20){var n=child.Current.Name;if(string.IsNullOrWhiteSpace(n)&&child.TryGetCurrentPattern(ValuePattern.Pattern,out var value))n=((ValuePattern)value).Current.Value;if(!string.IsNullOrWhiteSpace(n)&&!words.Contains(n))words.Add(n);child=walker.GetNextSibling(child);}
-                if(words.Count>0)list.Add(AccessibleRowLayout.Join(words[0],words.Skip(1)));
-                continue;
-            }
-            if(!current.IsOffscreen && !current.IsPassword && (current.ControlType==ControlType.Document || current.ControlType==ControlType.Edit)
-                && e.TryGetCurrentPattern(TextPattern.Pattern,out var textPattern)) {
-                // Only visible ranges: do not ingest a scrolled-away history as current screen content.
-                foreach(var range in ((TextPattern)textPattern).GetVisibleRanges().Take(100))
-                    list.AddRange(range.GetText(32000).Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries).Where(line=>line.Length<=1000).Take(300));
-                continue;
-            }
-            if(!current.IsOffscreen && current.ControlType==ControlType.Text && !string.IsNullOrWhiteSpace(current.Name))list.Add(current.Name);
-            if(depth<8){var child=walker.GetFirstChild(e);int children=0;while(child!=null && children++<100){queue.Enqueue((child,depth+1));child=walker.GetNextSibling(child);}}
+        var clip=region.HasValue
+            ? new System.Windows.Rect(window.X+region.Value.X,window.Y+region.Value.Y,region.Value.Width,region.Value.Height)
+            : new System.Windows.Rect(window.X,window.Y,window.W,window.H);
+        var result=new AccessibleReadResult();
+        var fragments=new List<AccessibleFragment>();
+        // Raw view includes cells hidden by the provider's ControlView classification.
+        var walker=TreeWalker.RawViewWalker;
+        var watch=Stopwatch.StartNew();int visited=0,failures=0;bool limited=false;
+        bool Budget() { if(visited>=4000 || watch.ElapsedMilliseconds>=1200){limited=true;return false;}return true; }
+        bool Inside(System.Windows.Rect rect) => !rect.IsEmpty && rect.Width>0 && rect.Height>0 && clip.Contains(rect);
+        void Walk(AutomationElement node,int depth,string scope,bool inRow)
+        {
+            if(!Budget())return;
+            visited++;
+            try {
+                var current=node.Current;
+                if(current.IsPassword)return;
+                var type=current.ControlType;
+                bool row=type==ControlType.DataItem || type==ControlType.ListItem;
+                if(!inRow && (row || type==ControlType.Table || type==ControlType.DataGrid || type==ControlType.List || type==ControlType.Pane || type==ControlType.Group))scope=visited.ToString();
+                int before=fragments.Count+result.Lines.Count;
+                // Traverse nested wrappers, even when their own Name or rectangle is empty.
+                var child=walker.GetFirstChild(node);
+                if(child!=null && depth>=24)limited=true;
+                while(child!=null && depth<24 && Budget()) {
+                    Walk(child,depth+1,scope,inRow||row);
+                    try {child=walker.GetNextSibling(child);}catch {failures++;break;}
+                }
+                if(current.IsOffscreen || !Inside(current.BoundingRectangle))return;
+                if(before!=fragments.Count+result.Lines.Count)return; // Do not duplicate parent row names.
+                if((type==ControlType.Document || type==ControlType.Edit) && node.TryGetCurrentPattern(TextPattern.Pattern,out var textPattern)) {
+                    var textLines=((TextPattern)textPattern).GetVisibleRanges().Take(100)
+                        .SelectMany(range=>range.GetText(32000).Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries)).Where(line=>line.Length<=1000).Take(300).ToList();
+                    if(type==ControlType.Edit && textLines.Count==1) {
+                        var r=current.BoundingRectangle;
+                        fragments.Add(new(scope,new(textLines[0],r.X,r.Y,r.Width,r.Height)));
+                    } else result.Lines.AddRange(textLines);
+                    if(before!=fragments.Count+result.Lines.Count)return;
+                }
+                if(type==ControlType.Text || type==ControlType.Edit || type==ControlType.Custom || row) {
+                    string text=current.Name;
+                    // A grid cell's Name may be its column heading; Value contains the actual data.
+                    if(node.TryGetCurrentPattern(ValuePattern.Pattern,out var value) && !string.IsNullOrWhiteSpace(((ValuePattern)value).Current.Value))text=((ValuePattern)value).Current.Value;
+                    if(!string.IsNullOrWhiteSpace(text) && text.Length<=1000) {
+                        var r=current.BoundingRectangle;
+                        fragments.Add(new(scope,new(text,r.X,r.Y,r.Width,r.Height)));
+                    }
+                }
+            }catch {failures++;} // One disappearing/broken cell must not discard every other row.
         }
-        return list.Where(x=>x.Length<=1000).Distinct().Take(300).ToList();
+        Walk(root,0,"root",false);
+        result.Lines.AddRange(AccessibleRowLayout.JoinFragments(fragments));
+        var lines=result.Lines.Where(x=>x.Length<=1000).Distinct().ToList();
+        if(lines.Count>300)limited=true;
+        result.Lines=lines.Take(300).ToList();
+        if(limited)result.Warnings.Add("UIA_PARTIAL: 직접 읽기 탐색 한도에 도달했습니다. 이벤트 내역 창 또는 로그 영역을 선택하세요. 나머지는 OCR로 확인합니다");
+        if(failures>0)result.Warnings.Add($"UIA_PARTIAL: {failures}개 요소를 읽지 못했습니다. 확보한 행과 OCR을 사용합니다");
+        return result;
     }
+}
+
+public sealed class AccessibleReadResult
+{
+    public List<string> Lines {get;set;}=new();
+    public List<string> Warnings {get;}=new();
 }

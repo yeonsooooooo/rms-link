@@ -9,6 +9,8 @@ public sealed class TrayContext : ApplicationContext
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _autoStartItem;
     private PreviewForm _preview;
+    private readonly ReadingAlert _readingAlert=new();
+    private readonly DateTime _startedAt=DateTime.Now;
 
     public TrayContext(AppConfig cfg, OcrService ocr, bool showPreview=false)
     {
@@ -91,6 +93,7 @@ public sealed class TrayContext : ApplicationContext
             ContextMenuStrip = menu
         };
         _icon.DoubleClick += (_, _) => ShowPreview();
+        _icon.BalloonTipClicked += (_, _) => ShowPreview();
         _ = menu.Handle; // Create UI dispatch handle before worker callbacks.
         _worker.Sink.ExitForUpdate = () => { if(!menu.IsDisposed) menu.BeginInvoke(new Action(ExitApp)); };
         _worker.Start();
@@ -114,10 +117,15 @@ public sealed class TrayContext : ApplicationContext
     {
         if(_worker.LastCycleAt!=DateTime.MinValue) File.WriteAllText(Path.Combine(AppConfig.InstallDir,"healthy-"+Updater.Version),DateTime.UtcNow.ToString("O"));
         var s = _worker.Sink;
+        var health=_worker.Health;
+        bool stalled=DateTime.Now-(_worker.LastCycleAt==DateTime.MinValue?_startedAt:_worker.LastCycleAt)>TimeSpan.FromSeconds(45);
+        string reading=stalled?"화면 판독 응답이 멈췄습니다. RMS와 RmsLink를 다시 확인하세요":health.Message;
         string text =
-            $"[{_cfg.HotelId}] OCR {_worker.OcrLang} · 발견 {_worker.EventsFound} · 전송 {s.SentCount} · 대기 {s.PendingCount}";
-        _statusItem.Text = text + (s.LastError.Length > 0 ? " · 전송 오류" : "") + " · " + s.UpdateStatus;
-        string tip = "RmsLink - " + text;
+            $"[{_cfg.HotelId}] 글자 {health.TextLines}줄 · 채택 {health.Accepted} · 전송 {s.SentCount} · 대기 {s.PendingCount}";
+        _statusItem.Text = reading+" · "+text + (s.LastError.Length > 0 ? " · 전송 오류" : "") + " · " + s.UpdateStatus;
+        if(_readingAlert.ShouldNotify(stalled || health.NeedsAttention || s.LastError.Length>0,DateTimeOffset.UtcNow))
+            _icon.ShowBalloonTip(10000,"RmsLink · 연동 확인 필요",(s.LastError.Length>0?s.LastError:reading)+"\n알림을 누르면 판독 미리보기가 열립니다.",ToolTipIcon.Warning);
+        string tip = "RmsLink - " + reading;
         _icon.Text = tip.Length > 63 ? tip[..63] : tip;
     }
 

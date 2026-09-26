@@ -48,5 +48,26 @@ export function readingMethods(o) {
     empty: "OCR에서도 글자를 찾지 못함",
     ok: `사진에서 글자 ${c.lineCount}줄을 읽음`,
   }[c.status];
-  return { title, detail, ocrDetail, uia: u, ocr: c };
+  let progress;
+  const accepted = o.readings?.length ?? u.acceptedCount + c.acceptedCount;
+  if (!accepted) {
+    progress =
+      o.coverage?.suggestedMode === "snapshot" && o.coverage?.mode === "events"
+        ? "시각 없는 문·키 상태를 읽었습니다. 화면·객실 설정에서 현재 상태표인지 확인하세요."
+        : o.coverage?.pending > 0
+          ? "아직 반영한 상태가 없습니다. OCR을 다음 화면과 대조 중입니다. 계속 대기하면 글자 크기와 로그 영역을 확인하세요."
+          : "아직 반영한 문·키 상태가 없습니다. 원문의 객실 번호·발생 시각·상태 문구와 실패 사유를 확인하세요.";
+  } else if (
+    o.readings?.every(
+      (r) =>
+        r.kind === "event" &&
+        Date.parse(o.capturedAt) - Date.parse(r.occurredAt) >= 300000,
+    )
+  ) {
+    progress =
+      "과거 이벤트만 읽었습니다. 시험 객실에서 문·키를 조작하고 새 이벤트가 수신되는지 확인하세요.";
+  } else {
+    progress = `이번 화면에서 문·키 상태 ${accepted}개를 채택했습니다. 실제 동작과 대조해 주세요.`;
+  }
+  return { title, detail, ocrDetail, progress, uia: u, ocr: c };
 }

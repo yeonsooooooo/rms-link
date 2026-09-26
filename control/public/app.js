@@ -253,6 +253,7 @@ function methodsPanel(d) {
   return `<div class="notice reading-methods"><h3>어떻게 읽었나요?</h3>
     ${!current ? "<p><b>이전 수집 결과입니다. 다시 연결된 뒤 현재 화면을 확인하세요.</b></p>" : ""}
     <b>${escape(m.title)}</b><p>${escape(m.detail)}</p><p>${escape(m.ocrDetail || "")}</p>
+    ${m.progress ? `<p><b>${escape(m.progress)}</b></p>` : ""}
     ${m.uia ? `<div class="table-scroll"><table><thead><tr><th>읽기 방법</th><th>가져온 글자</th><th>해석한 상태</th><th>사용한 상태</th></tr></thead><tbody>${["uia", "ocr"].map((source) => `<tr><td>${sourceName(source)}</td><td>${m[source].lineCount}줄</td><td>${m[source].candidateCount}개</td><td>${m[source].acceptedCount}개</td></tr>`).join("")}</tbody></table></div><p>이번 화면의 건수입니다. 두 방법이 같은 상태를 읽으면 양쪽에 표시됩니다. 확인 대기·충돌·오류가 있으면 사용하지 않습니다.</p>` : ""}
     <h3>사람이 대조한 샘플의 정확도</h3>
     <p>실제 객실 번호와 문·키 상태를 확인해 맞음과 틀림을 모두 기록하세요. 자동 대조만으로는 정확도를 계산하지 않습니다.</p>

@@ -8,6 +8,23 @@ const methods = (status, lineCount = 0, candidateCount = 0) => ({
   },
   readings: [],
 });
+
+test("reading progress distinguishes text collection, confirmation, history and accepted state", () => {
+  const empty = methods("ok", 20, 0);
+  assert.match(
+    readingMethods(empty).progress,
+    /아직 반영한 문·키 상태가 없습니다/,
+  );
+  empty.coverage = { mode: "events", suggestedMode: "snapshot", pending: 0 };
+  assert.match(readingMethods(empty).progress, /현재 상태표/);
+  empty.coverage = { mode: "events", suggestedMode: "events", pending: 2 };
+  assert.match(readingMethods(empty).progress, /다음 화면과 대조/);
+  empty.capturedAt = "2026-09-26T12:10:00Z";
+  empty.readings = [{ kind: "event", occurredAt: "2026-09-26T12:00:00Z" }];
+  assert.match(readingMethods(empty).progress, /과거 이벤트만/);
+  empty.readings[0].occurredAt = "2026-09-26T12:09:59Z";
+  assert.match(readingMethods(empty).progress, /상태 1개를 채택/);
+});
 test("plain language distinguishes skipped, failed, empty, unparsed and usable direct reading", () => {
   assert.match(readingMethods(null).detail, /이전 버전/);
   assert.match(

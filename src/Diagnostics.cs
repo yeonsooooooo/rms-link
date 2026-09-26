@@ -26,8 +26,43 @@ public static class Diagnostics
         form.Controls.Add(new TextBox{Text="103 DOOR OPEN",ReadOnly=true,Multiline=true,Location=new(40,200),Size=new(550,65),Font=new("Arial",22)});
         using var timer=new System.Windows.Forms.Timer{Interval=90000};timer.Tick+=(_,_)=>form.Close();timer.Start();Application.Run(form);return 0;
     }
+    public static int AccessibilityFixture()
+    {
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);Application.EnableVisualStyles();
+        using var form=new Form{Text="RmsLink nested event table fixture",ClientSize=new(700,380),StartPosition=FormStartPosition.Manual,Location=new(30,30)};
+        Control host=form;
+        for(int i=0;i<10;i++){var panel=new Panel{Dock=DockStyle.Fill};host.Controls.Add(panel);host=panel;}
+        host.Controls.Add(new Label{Text="104",Location=new(20,20),Size=new(60,25)});
+        host.Controls.Add(new Label{Text="DOOR OPEN",Location=new(120,20),Size=new(140,25)});
+        host.Controls.Add(new Label{Text="12:01:00",Location=new(300,20),Size=new(120,25)});
+        var grid=new DataGridView{Location=new(20,90),Size=new(620,130),AllowUserToAddRows=false,ReadOnly=true,RowHeadersVisible=false};
+        grid.Columns.Add("room","객실");grid.Columns.Add("event","상태");grid.Columns.Add("time","시각");
+        grid.Rows.Add("105","KEY IN","12:01:01");host.Controls.Add(grid);
+        // A password must never become event evidence.
+        host.Controls.Add(new TextBox{Text="106 DOOR OPEN 12:01:02",UseSystemPasswordChar=true,Location=new(20,270),Width=600});
+        using var timer=new System.Windows.Forms.Timer{Interval=90000};timer.Tick+=(_,_)=>form.Close();timer.Start();Application.Run(form);return 0;
+    }
+    static void NativeAccessibleTableTest()
+    {
+        using var fixture=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath,"--accessibility-fixture"){UseShellExecute=false});
+        try {
+            WindowCandidate w=null;for(int i=0;i<60;i++){w=WindowProbe.All().FirstOrDefault(x=>x.ProcessId==fixture.Id);if(w!=null)break;Thread.Sleep(250);}
+            if(w==null)throw new Exception("Nested table fixture window missing");
+            var profile=new AdapterProfile{Aliases=new(){["DOOR OPEN"]="DOOR_OPEN",["KEY IN"]="KEY_IN"}};
+            var now=DateTimeOffset.Parse("2026-09-26T12:02:00+09:00");
+            var task=Task.Run(()=>WindowProbe.ReadAccessible(w));
+            if(!task.Wait(5000))throw new Exception("Nested table accessibility timeout");
+            var events=new ReadingSession().Read(task.Result.Lines,Array.Empty<string>(),profile,now,"table").Events;
+            if(!events.Select(e=>e.Room).Order().SequenceEqual(new[]{"104","105"}))throw new Exception("Nested cells/ValuePattern rows missing or password leaked: "+JsonDefaults.Serialize(task.Result));
+            var roi=Task.Run(()=>WindowProbe.ReadAccessible(w,new Rectangle(0,0,w.W,60)));
+            if(!roi.Wait(5000))throw new Exception("Region accessibility timeout");
+            var regionEvents=new ReadingSession().Read(roi.Result.Lines,Array.Empty<string>(),profile,now,"roi").Events;
+            if(regionEvents.Count!=1 || regionEvents[0].Room!="104")throw new Exception("Region must read only its complete event row: "+JsonDefaults.Serialize(roi.Result));
+        }finally {if(!fixture.HasExited){fixture.Kill();fixture.WaitForExit(5000);}}
+    }
     static object NativeCaptureTest(string folder)
     {
+        NativeAccessibleTableTest();
         using(var setup=new SetupForm(new())){
             setup.ClientSize=new(640,400);setup.Show();Application.DoEvents();
             if(!setup.VerticalScroll.Visible)throw new Exception("Small-display setup must scroll to the connection button");
@@ -86,7 +121,7 @@ public static class Diagnostics
             if(!branded.Icon.Contains("keytech.ico"))throw new Exception("Keytech icon missing");
             File.Delete(original);
             using var picker=new AppPickerForm();picker.Show();Application.DoEvents();using(var shot=new Bitmap(picker.Width,picker.Height)){picker.DrawToBitmap(shot,new Rectangle(0,0,shot.Width,shot.Height));shot.Save(Path.Combine(folder,"native-app-picker.png"));}picker.Close();
-            return new{shortcutArgumentsPreserved=true,keytechIcon=true,formConstruction=true,windowEnumeration=true,explicitSelection=true,unrelatedAppRejected=true,windowCapture=true,minimizedRejected=true,minimizedRestored=true,accessibilityParsed=true,visibleTextPattern=true,ocrConsensus=true,occludedCapture=true,handleRecovery=true,fixtureOnly=true};
+            return new{nestedAccessibleTable=true,regionAccessibility=true,passwordExcluded=true,shortcutArgumentsPreserved=true,keytechIcon=true,formConstruction=true,windowEnumeration=true,explicitSelection=true,unrelatedAppRejected=true,windowCapture=true,minimizedRejected=true,minimizedRestored=true,accessibilityParsed=true,visibleTextPattern=true,ocrConsensus=true,occludedCapture=true,handleRecovery=true,fixtureOnly=true};
         }finally{if(!fixture.HasExited){fixture.Kill();fixture.WaitForExit(5000);}}
     }
     public static int RunSelfTest()

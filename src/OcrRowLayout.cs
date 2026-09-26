@@ -19,8 +19,11 @@ public static class OcrRowLayout
     }
 }
 
+public sealed record AccessibleFragment(string Scope,ScreenWord Word);
 public static class AccessibleRowLayout
 {
+    public static List<string> JoinFragments(IEnumerable<AccessibleFragment> fragments) => fragments
+        .Distinct().GroupBy(f=>f.Scope).SelectMany(g=>OcrRowLayout.Join(g.Select(f=>f.Word))).ToList();
     public static string Join(string name,IEnumerable<string> cells)
     {
         var values=cells.Where(s=>!string.IsNullOrWhiteSpace(s)).Distinct().ToArray();

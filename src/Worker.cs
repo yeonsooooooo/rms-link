@@ -15,12 +15,13 @@ public sealed class Worker : IDisposable
     readonly ReadingSession reader=new();
     Task loop;
     AdapterProfile profile;
-    Task<List<string>> accessibilityTask;
-    long accessibilityHandle;
+    Task<AccessibleReadResult> accessibilityTask;
+    WindowCandidate accessibilityWindow;
     DateTime lastAccessibilityStart, lastRestore=DateTime.MinValue;
     public readonly ControlSink Sink;
     readonly StageReport captureReport=new(Path.Combine(AppConfig.Dir,"capture-status.json"));
     public string LastCaptureStatus="첫 화면을 기다리는 중";
+    public ReadingHealth Health {get;private set;}=ReadingHealth.Starting;
     public long OcrRuns,EventsFound;
     public DateTime LastCycleAt=DateTime.MinValue;
     public string OcrLang=>ocr?.LanguageTag??"없음";
@@ -31,27 +32,28 @@ public sealed class Worker : IDisposable
     }
     public void Start(){Sink.Start();loop=Task.Run(Loop);}
 
-    async Task<(List<string> Lines,string Status)> Accessible(WindowCandidate window,List<string> warnings)
+    async Task<(List<string> Lines,string Status)> Accessible(WindowCandidate window,Rectangle? region,List<string> warnings)
     {
         if(accessibilityTask==null) {
-            accessibilityHandle=window.Handle; lastAccessibilityStart=DateTime.UtcNow;
-            accessibilityTask=Task.Run(()=>WindowProbe.ReadAccessibleRows(window));
+            accessibilityWindow=window; lastAccessibilityStart=DateTime.UtcNow;
+            accessibilityTask=Task.Run(()=>WindowProbe.ReadAccessible(window,region));
         }
         if(!accessibilityTask.IsCompleted) await Task.WhenAny(accessibilityTask,Task.Delay(650,cts.Token));
         if(!accessibilityTask.IsCompleted) { warnings.Add("UIA_TIMEOUT: 접근성 응답 대기 · OCR 사용"); return (new(),"timeout"); }
         var task=accessibilityTask; accessibilityTask=null;
         // A result is consumed once; an old/hung provider must never confirm another frame.
         try {
-            var lines=await task;
-            if(accessibilityHandle!=window.Handle || DateTime.UtcNow-lastAccessibilityStart>=TimeSpan.FromSeconds(3)) { warnings.Add("UIA_STALE: 직접 읽기 응답이 늦어 이번 화면에는 사용하지 않았습니다"); return (new(),"stale"); }
-            return (lines,lines.Count>0?"ok":"empty");
+            var read=await task;
+            if(accessibilityWindow!=window || !WindowProbe.SameGeometry(window) || DateTime.UtcNow-lastAccessibilityStart>=TimeSpan.FromSeconds(3)) { warnings.Add("UIA_STALE: 직접 읽기 응답이 늦거나 창 위치가 바뀌어 이번 화면에는 사용하지 않았습니다"); return (new(),"stale"); }
+            warnings.AddRange(read.Warnings);
+            return (read.Lines,read.Lines.Count>0?"ok":"empty");
         } catch { warnings.Add("UIA_UNAVAILABLE: 접근성 조회 실패 · OCR 사용"); return (new(),"error"); }
     }
 
     async Task Loop()
     {
         DateTime nextHeartbeat=DateTime.MinValue,nextImage=DateTime.MinValue;
-        string lastFingerprint="";
+        string lastFingerprint="",lastHealth="";
         while(!cts.IsCancellationRequested) {
             var errors=new List<string>(); var warnings=new List<string>();
             var candidates=new List<WindowCandidate>(); var result=new ReadingResult();
@@ -78,8 +80,8 @@ public sealed class Worker : IDisposable
                 if(window?.Minimized==true) errors.Add("WINDOW_MINIMIZED: 키텍 창 복원이 필요합니다");
                 if(desktop && window!=null && !window.Minimized) {
                     application=WindowProbe.Describe(window,cfg.SelectedApp.Vendor);
-                    if(regions.Count==0) (uia,uiaStatus)=await Accessible(window,warnings);
-                    else uiaStatus="skipped_region";
+                    if(regions.Count==0 || new Rectangle(0,0,window.W,window.H).Contains(regions[0].Rect))
+                        (uia,uiaStatus)=await Accessible(window,regions.Count==0?null:regions[0].Rect,warnings);
                     try {
                         var captured=await capture.Read(window);
                         using var whole=captured.Image; captureMethod=captured.Method;
@@ -104,7 +106,7 @@ public sealed class Worker : IDisposable
                     } catch(Exception ex) { errors.Add(ex.Message.Contains(':')?ex.Message:"CAPTURE_FAILURE: "+ex.Message); reader.BreakContinuity(); }
                 } else reader.BreakContinuity();
 
-                // Failed capture/contradictory reading is diagnostic evidence, never accepted state.
+                // Global capture failures block everything. ReadingSession isolates malformed/conflicting fields.
                 var accepted=errors.Count==0 ? result.Events : new List<ParsedEvent>();
                 var found=accepted.Where(e=>e.Kind=="snapshot" || !seen.ContainsKey(e.DedupKey)).Take(600).ToList();
                 var diagLines=new List<LineDiag>();
@@ -120,9 +122,15 @@ public sealed class Worker : IDisposable
                     foreach(var field in new[]{"door","key"}) if(!visible.Contains(room+"|"+field)) uncertain.Add(new(room,field));
                 }
                 errors=errors.Distinct().Take(30).ToList(); warnings=warnings.Distinct().Take(30).ToList();
-                LastCaptureStatus=errors.Count>0?string.Join(" · ",errors):accepted.Count>0?"화면 판독 확인 · 실제 문·키 대조 필요":"화면 수집 중 · 판독 연속 확인 또는 새 이벤트 대기";
+                Health=ReadingHealth.Evaluate(result,accepted,errors,warnings,DateTimeOffset.Now);
+                LastCaptureStatus=Health.Message;
+                if(lastHealth!=Health.Code) {
+                    Logger.Info($"판독 상태 {Health.Code}: {Health.Message} (글자 {Health.TextLines}줄 / 해석 {Health.Candidates} / 채택 {Health.Accepted})");
+                    lastHealth=Health.Code;
+                }
                 captureReport.Set("CAPTURE",evidence==null?"failed":"passed",evidence==null?LastCaptureStatus:"선택한 창 이미지 캡처 확인");
-                captureReport.Set("READING",errors.Count>0?"failed":accepted.Count>0?"passed":"waiting",LastCaptureStatus+(warnings.Count>0?" · "+string.Join(" · ",warnings):""));
+                captureReport.Set("READING",errors.Count>0?"failed":Health.NeedsAttention?"waiting":"passed",LastCaptureStatus+$" · 글자 {Health.TextLines}줄 / 해석 {Health.Candidates} / 채택 {Health.Accepted}"+(warnings.Count>0?" · "+string.Join(" · ",warnings):""));
+                captureReport.Set("READING_REASONS","info",string.Join(" · ",result.Lines.Where(l=>l.Reason.Length>0).GroupBy(l=>l.Reason).OrderByDescending(g=>g.Count()).Take(10).Select(g=>$"{g.Key}: {g.Count()}줄")));
                 var methods=new {
                     uia=new {status=uiaStatus,lineCount=uia.Count,candidateCount=result.Lines.Where(l=>l.Source=="uia").Sum(l=>l.Events.Count),acceptedCount=accepted.Count(e=>e.Source is "uia" or "hybrid")},
                     ocr=new {status=ocrStatus,lineCount=ocrLines.Count,candidateCount=result.Lines.Where(l=>l.Source=="ocr").Sum(l=>l.Events.Count),acceptedCount=accepted.Count(e=>e.Source is "ocr" or "hybrid")}
@@ -149,8 +157,9 @@ public sealed class Worker : IDisposable
                         coverage=new {mode=activeProfile.Mode,suggestedMode=result.SuggestedMode,expectedRooms=activeProfile.ExpectedRooms,observedRooms=accepted.Select(e=>e.Room).Distinct().Take(500),pending=result.Pending,snapshotEvidenceAt=result.SnapshotEvidenceAt},
                         readings=accepted.Take(600).Select(e=>new {e.Room,e.Code,e.Kind,e.RawLine,e.OccurredAt,e.ObservedAt,e.Source}),
                         channelReadings=result.Lines.SelectMany(l=>l.Events.Select(e=>new {e.Room,e.Code,e.Kind,e.RawLine,e.OccurredAt,e.ObservedAt,source=l.Source})).Take(1200),
-                        lines=diagLines.Take(100).Select(l=>new {text=l.Text,source=l.Source,code=l.Event?.Code,room=l.Event?.Room,reason=l.Reason}),
-                        unmatched=result.Lines.Where(l=>l.Events.Count==0).Take(40).Select(l=>new {text=l.Text[..Math.Min(l.Text.Length,300)],reason=l.Reason}),image
+                        // Preserve OCR evidence even when UIA returned hundreds of menu/heading lines.
+                        lines=diagLines.GroupBy(l=>l.Source).SelectMany(g=>g.OrderBy(l=>l.Event!=null || l.Reason.StartsWith("확인 대기")?0:l.Reason.StartsWith("시각 없음")?2:1).Take(50)).Take(100).Select(l=>new {text=l.Text,source=l.Source,code=l.Event?.Code,room=l.Event?.Room,reason=l.Reason}),
+                        unmatched=result.Lines.Where(l=>l.Events.Count==0).GroupBy(l=>l.Source).SelectMany(g=>g.OrderBy(l=>l.Reason.StartsWith("시각 없음")?1:0).Take(20)).Take(40).Select(l=>new {text=l.Text[..Math.Min(l.Text.Length,300)],reason=l.Reason}),image
                     };
                     Sink.Enqueue(observation,found,activeProfile.Revision);
                     foreach(var ev in found.Where(e=>e.Kind=="event")) seen[ev.DedupKey]=ev.ObservedAt;
@@ -161,7 +170,7 @@ public sealed class Worker : IDisposable
                     foreach(var d in diags) d.LastImage?.Dispose(); diags.Clear();
                     diags.Add(new(){Index=0,LastImage=evidence==null?null:(Bitmap)evidence.Clone(),Lines=diagLines,LastOcrAt=DateTime.Now});
                 }
-            } catch(Exception ex) { Logger.Error("수집 실패: "+ex.Message); LastCaptureStatus="CAPTURE_FAILURE: "+ex.Message;captureReport.Set("CAPTURE","failed",LastCaptureStatus); reader.BreakContinuity(); }
+            } catch(Exception ex) { Logger.Error("수집 실패: "+ex.Message); LastCaptureStatus="CAPTURE_FAILURE: "+ex.Message;Health=new("CAPTURE_FAILURE",LastCaptureStatus,true,0,0,0);captureReport.Set("CAPTURE","failed",LastCaptureStatus); reader.BreakContinuity(); }
             finally { evidence?.Dispose(); LastCycleAt=DateTime.Now; }
             try { await Task.Delay(activeProfile.PollMs,cts.Token); } catch(OperationCanceledException) { break; }
         }

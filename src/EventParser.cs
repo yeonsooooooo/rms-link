@@ -21,8 +21,11 @@ public static class EventParser
     static Match Match(string text,string pattern) => Regex.Match(text,pattern,RegexOptions.None,Timeout);
     public static ParsedEvent TryParse(string line, DateTime now, out string reason) => Parse(line,new DateTimeOffset(now),new AdapterProfile(),out reason).FirstOrDefault();
     public static List<ParsedEvent> Parse(string line, DateTimeOffset now, AdapterProfile profile, out string reason)
+        => Parse(line,now,profile,out reason,out _);
+    public static List<ParsedEvent> Parse(string line, DateTimeOffset now, AdapterProfile profile, out string reason, out List<string> uncertainRooms)
     {
         reason="";
+        uncertainRooms=new();
         var result=new List<ParsedEvent>();
         if (string.IsNullOrWhiteSpace(line) || line.Length>1000) { reason="빈 줄 또는 길이 초과"; return result; }
         string work=line.Normalize(); var occurred=now; var local=now;
@@ -46,7 +49,12 @@ public static class EventParser
         } else if(date.Success || shortDate.Success) { reason="시각 없는 과거 날짜는 현재 상태로 사용할 수 없음";return result; }
         var roomMatch=Match(work,profile.RoomPattern);
         if(!roomMatch.Success || roomMatch.Groups.Count<2){reason="객실번호 없음";return result;}
-        if(Regex.Matches(work,profile.RoomPattern,RegexOptions.None,Timeout).Count>1){reason="여러 객실번호가 한 줄에 있음: 로그 열 분리 필요";return result;}
+        var roomMatches=Regex.Matches(work,profile.RoomPattern,RegexOptions.None,Timeout);
+        if(roomMatches.Count>1){
+            uncertainRooms=roomMatches.Select(m=>profile.RoomMap.GetValueOrDefault(m.Groups[1].Value,m.Groups[1].Value))
+                .Where(r=>Regex.IsMatch(r,@"^[\p{L}\d_-]{1,30}$",RegexOptions.None,Timeout) && (profile.ExpectedRooms.Count==0 || profile.ExpectedRooms.Contains(r))).Distinct().ToList();
+            reason="여러 객실번호가 한 줄에 있음: 로그 열 분리 필요";return result;
+        }
         string room=roomMatch.Groups[1].Value;
         if(profile.RoomMap.TryGetValue(room,out var mapped)) room=mapped;
         if(!Regex.IsMatch(room,@"^[\p{L}\d_-]{1,30}$")){reason="객실번호 범위 오류";return result;}
@@ -54,7 +62,7 @@ public static class EventParser
         work=work.Remove(roomMatch.Index,roomMatch.Length);
         var text=Regex.Replace(work,@"[\s\p{P}]", "",RegexOptions.None,Timeout);
         // No fuzzy auto-accept: 삽입/제거 and 열림/닫힘 are safety-critical opposites.
-        if(Regex.IsMatch(text,@"아님|않음|불명|미확인|오류|실패|unknown|error",RegexOptions.IgnoreCase,Timeout)){reason="부정 또는 오류 상태";return result;}
+        if(Regex.IsMatch(text,@"아님|않음|불명|미확인|오류|실패|unknown|error",RegexOptions.IgnoreCase,Timeout)){uncertainRooms.Add(room);reason="부정 또는 오류 상태";return result;}
         var vocab=new Dictionary<string,string>(Common);
         foreach(var a in profile.Aliases) vocab[a.Key]=a.Value;
         var matches=new List<(string Key,string Code)>();
@@ -65,7 +73,7 @@ public static class EventParser
         }
         foreach(var group in matches.GroupBy(x=>x.Code.StartsWith("DOOR")?"door":"key")) {
             var codes=group.Select(x=>x.Code).Distinct().ToArray();
-            if(codes.Length>1){reason="한 줄에 상충 상태: 영역/열 분리 필요";return new();}
+            if(codes.Length>1){uncertainRooms.Add(room);reason="한 줄에 상충 상태: 영역/열 분리 필요";return new();}
             var item=group.First();
             result.Add(new ParsedEvent(room,item.Code,item.Key,occurred.ToString("HH:mm:ss"),DateOnly.FromDateTime(occurred.Date),line,false){Kind=profile.Mode=="snapshot"?"snapshot":"event",ObservedAt=now.ToUniversalTime(),OccurredAt=(profile.Mode=="snapshot"?now:occurred).ToUniversalTime()});
         }

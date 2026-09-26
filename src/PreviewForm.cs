@@ -41,20 +41,20 @@ public sealed class PreviewForm : Form
         dbBtn.Click += async (_, _) =>
         {
             dbBtn.Enabled = false;
-            _statusLabel.Text = "맥 미니 연결 확인 중...";
+            _statusLabel.Text = "관리 서버 연결 확인 중...";
             try { _statusLabel.Text = await _worker.Sink.CheckConnection(); } catch(Exception ex) { _statusLabel.Text = "연결 실패: "+ex.Message; } finally { dbBtn.Enabled = true; }
         };
 
         _statusLabel = new Label
         {
             Location = new Point(12, 44), AutoSize = false,
-            Size = new Size(830, 60), Text = "",
+            Size = new Size(830, 110), Text = "", AutoEllipsis=true,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
 
         _pic = new PictureBox
         {
-            Location = new Point(12, 108), Size = new Size(830, 200),
+            Location = new Point(12, 158), Size = new Size(830, 200),
             SizeMode = PictureBoxSizeMode.Zoom,
             BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -62,7 +62,7 @@ public sealed class PreviewForm : Form
 
         _list = new ListView
         {
-            Location = new Point(12, 316), Size = new Size(830, 390),
+            Location = new Point(12, 366), Size = new Size(830, 340),
             View = View.Details, FullRowSelect = true, GridLines = true,
             Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
         };
@@ -70,7 +70,7 @@ public sealed class PreviewForm : Form
         _list.Columns.Add("객실", 55);
         _list.Columns.Add("코드", 110);
         _list.Columns.Add("시각", 80);
-        _list.Columns.Add("OCR 원문 / 사유", 480);
+        _list.Columns.Add("판독 원문 / 사유", 480);
 
         _timer = new System.Windows.Forms.Timer { Interval = 2000 };
         _timer.Tick += (_, _) => { if (autoChk.Checked) RefreshView(); };
@@ -120,10 +120,12 @@ public sealed class PreviewForm : Form
         _list.EndUpdate();
 
         var s = _worker.Sink;
+        var health=_worker.Health;
         string err = s.LastError.Length > 0 ? $" | 오류: {s.LastError}" : "";
+        _statusLabel.ForeColor=health.NeedsAttention || err.Length>0?Color.DarkRed:Color.DarkGreen;
         _statusLabel.Text =
-            _worker.LastCaptureStatus + "\n" + $"OCR: {_worker.OcrLang} | 마지막 판독: {(at == DateTime.MinValue ? "-" : at.ToString("HH:mm:ss"))} " +
-            $"| OCR 실행 {_worker.OcrRuns}회 | 이벤트 {_worker.EventsFound}건 발견 | 맥 미니 전송 {s.SentCount}건, 대기 {s.PendingCount}건\n{err}";
+            _worker.LastCaptureStatus + "\n" + $"글자 {health.TextLines}줄 → 상태 해석 {health.Candidates}건 → 채택 {health.Accepted}건 | OCR: {_worker.OcrLang}\n" +
+            $"마지막 판독: {at:HH:mm:ss} | 서버 전송 {s.SentCount}묶음, 대기 {s.PendingCount}묶음 (연결 보고 포함)\n{err}";
     }
 
     private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n] + "…";
